@@ -97,6 +97,7 @@ export type ProviderClient = Pick<
     | 'readServiceStatus'
     | 'withScheduleAuthority'
     | 'requestFile'
+    | 'requestTranscription'
   >
 > & {
   readonly providerId?: ModelApiClient['providerId']
@@ -106,6 +107,10 @@ export type ProviderClient = Pick<
   readonly readServiceStatus?: ModelApiClient['readServiceStatus']
   readonly withScheduleAuthority?: (run: () => UnattendedRun | undefined) => ProviderClient
   readonly provider?: TransportProviderClient['provider']
+  /** The Files transport rides along only when the wrapped client carries it. */
+  readonly requestFile?: ModelApiClient['requestFile']
+  /** So does the batch transcription POST (U18): only Meta's own client carries it. */
+  readonly requestTranscription?: ModelApiClient['requestTranscription']
   readonly models?: ModelResolver
   readonly modelContextLimit?: (model: string) => number | undefined
   readonly isPlanModel?: (model: string) => boolean
@@ -335,6 +340,13 @@ export class ModelApiClient implements TransportProviderClient {
     ...args: Parameters<RequestTransport['requestFile']>
   ): Promise<Response> {
     return await this.transport.requestFile(...args)
+  }
+
+  /** U18's batch transcription POST on this client's endpoint and key (D85.5). */
+  public async requestTranscription(
+    ...args: Parameters<RequestTransport['requestTranscription']>
+  ): Promise<Response> {
+    return await this.transport.requestTranscription(...args)
   }
 
   /** The wait before retry number `attempt` (0-based): the same backoff and jitter as a request's. */
