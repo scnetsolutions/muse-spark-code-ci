@@ -1250,6 +1250,7 @@ export class ConversationController {
    * the transcript of what it already sent arrives or the panel closes.
    */
   private retiredDictation: DictationHandle | undefined
+  private readonly voiceDisposals = new Set<Promise<void>>()
   /**
    * Counts every microphone press (M58): a Muse Voice start waits for the
    * paid-use popup, and a stop pressed meanwhile cancels it.
@@ -7889,9 +7890,11 @@ export class ConversationController {
         return
       }
       hasReachedHost = true
-      const outcome = await this.runResuming(host, session, (current) =>
-        current.controlGoal(command),
-      )
+      const outcome = await this.runResuming(host, session, (current) => {
+        // Preserve the parent goal fence on independently Meta-keyed voice.
+        this.voiceContextRevision += 1
+        return current.controlGoal(command)
+      })
       if (
         generation !== this.sendInvalidationEpoch ||
         !this.isAuthAdmitted() ||
@@ -9676,16 +9679,6 @@ export class ConversationController {
   /** The engine the microphone uses now, and its setup (M35). */
   private dictationChoice(): { readonly engine: DictationEngine; readonly setup: DictationSetup } {
     const museVoice = this.deps.museVoice()
-    if (
-      museVoice !== undefined &&
-      this.voiceIsModelApi() &&
-      Usd.from(this.deps.modelApiSessionBudgetUsd()).compare(Usd.from(0)) > 0
-    ) {
-      return {
-        engine: 'museVoice',
-        setup: { isAvailable: false, reason: UI_TEXT.sessionBudgetVoiceUnavailable },
-      }
-    }
     return museVoice === undefined
       ? { engine: 'system', setup: this.deps.dictation }
       : { engine: 'museVoice', setup: museVoice }
@@ -9703,11 +9696,11 @@ export class ConversationController {
     if (!this.voiceIsModelApi()) {
       return undefined
     }
-    if (Usd.from(this.deps.modelApiSessionBudgetUsd()).compare(Usd.from(0)) > 0) {
-      throw new Error(UI_TEXT.sessionBudgetVoiceUnavailable)
-    }
+    const requiresJournal = () =>
+      Usd.from(this.deps.modelApiSessionBudgetUsd()).compare(Usd.from(0)) > 0
     const workspaceRoot = this.deps.workspaceRoot
     if (workspaceRoot === undefined) {
+      if (requiresJournal()) throw new Error(UI_TEXT.sessionBudgetStoreUnavailable)
       return undefined
     }
     const generation = this.attachmentGeneration
@@ -9722,6 +9715,9 @@ export class ConversationController {
     this.requireCurrentOpening(generation)
     if (!this.isVoiceSessionCurrent(session)) {
       throw new Error(UI_TEXT.turnStoppedByRestart)
+    }
+    if (scope === undefined && requiresJournal()) {
+      throw new Error(UI_TEXT.sessionBudgetStoreUnavailable)
     }
     return scope === undefined
       ? undefined
@@ -9755,6 +9751,39 @@ export class ConversationController {
     )
   }
 
+  private disposeVoice(driver: DictationHandle | undefined): void {
+    if (driver === undefined) return
+    const disposal = (async () => {
+      try {
+        await driver.dispose()
+      } catch {
+        this.deps.log.warn('Voice cleanup failed')
+      }
+    })()
+    this.voiceDisposals.add(disposal)
+    void disposal.then(() => this.voiceDisposals.delete(disposal))
+  }
+
+  /**
+   * The backends are stopping (a restart, sign-out or shutdown): the owned
+   * driver and the retired one drain — capture stopped, sockets closed,
+   * admission and settlement writes waited for — and the button reads idle.
+   */
+  private async stopVoice(): Promise<void> {
+    const current = this.dictation
+    this.dictation = undefined
+    const retired = this.retiredDictation
+    this.retiredDictation = undefined
+    this.disposeVoice(current)
+    this.disposeVoice(retired)
+    await Promise.allSettled(this.voiceDisposals)
+    if (this.dictationStatus === 'idle') {
+      return
+    }
+    this.dictationStatus = 'idle'
+    this.postDictationState()
+  }
+
   /**
    * The driver of an engine that is no longer the microphone's (M35, the
    * review of PR #27): an idle one goes; a recording one stops at once, so
@@ -9768,11 +9797,11 @@ export class ConversationController {
     }
     this.dictation = undefined
     if (this.dictationStatus === 'idle') {
-      old.dispose()
+      this.disposeVoice(old)
       return
     }
     old.stop()
-    this.retiredDictation?.dispose()
+    this.disposeVoice(this.retiredDictation)
     this.retiredDictation = old
   }
 
@@ -9800,6 +9829,9 @@ export class ConversationController {
       },
       onError: (reason) => {
         this.notice('error', `${UI_TEXT.dictationFailed}: ${reason}`)
+      },
+      onVoiceUsage: (message) => {
+        this.notice('info', message)
       },
     })
     return this.dictation
@@ -9852,22 +9884,38 @@ export class ConversationController {
           throw new Error(UI_TEXT.sessionBudgetVoiceContextChanged)
         }
         if (!isSending) return
-        if (isModelApi && Usd.from(this.deps.modelApiSessionBudgetUsd()).compare(Usd.from(0)) > 0) {
-          throw new Error(UI_TEXT.sessionBudgetVoiceUnavailable)
+        if (
+          isModelApi &&
+          scope === undefined &&
+          Usd.from(this.deps.modelApiSessionBudgetUsd()).compare(Usd.from(0)) > 0
+        ) {
+          throw new Error(UI_TEXT.sessionBudgetStoreUnavailable)
         }
         const current = this.dictationChoice()
         if (current.engine !== 'museVoice' || !current.setup.isAvailable) {
           throw new Error(UI_TEXT.sessionBudgetVoiceContextChanged)
         }
       }
-      if (!isCurrent() || scope?.isStillAllowed(accountId) === false) {
+      // A press a newer one superseded stays quiet; a dead scope never
+      // does: the press had consent and a key, so it hears why it stopped.
+      if (!isCurrent()) {
+        this.postDictationState()
+        return
+      }
+      if (scope?.isStillAllowed(accountId) === false) {
+        this.notice('warning', UI_TEXT.sessionBudgetVoiceContextChanged)
         this.postDictationState()
         return
       }
       consentFence(accountId, true)
-      // Each Muse Voice recording is paid: the popup first (M58, PLAN.md D48).
+      // Every paid recording asks; Allow once covers one recording (CM352).
       const isAllowed = (await this.deps.allowsPaidUse({ feature: 'voice' })) === true
-      if (!isAllowed || !isCurrent() || scope?.isStillAllowed(accountId) === false) {
+      if (!isAllowed || !isCurrent()) {
+        this.postDictationState()
+        return
+      }
+      if (scope?.isStillAllowed(accountId) === false) {
+        this.notice('warning', UI_TEXT.sessionBudgetVoiceContextChanged)
         this.postDictationState()
         return
       }
@@ -11014,6 +11062,10 @@ export class ConversationController {
       this.bestOfNManager?.dispose()
       this.bestOfNManager = undefined
       this.lastBestOfNRun = undefined
+      // The microphone stops with the backends: the drain ends the recording
+      // (or the preparation still reserving it) and waits for its admission
+      // and settlement writes, so no open reservation outlives the window.
+      await this.stopVoice()
       this.gapReload = undefined
       this.unsubscribe?.()
       this.unsubscribe = undefined
@@ -11203,12 +11255,18 @@ export class ConversationController {
     this.usageWatch.dispose()
     this.usageHost = undefined
     this.latestUsage = undefined
-    this.dictation?.dispose()
+    this.disposeVoice(this.dictation)
     this.dictation = undefined
-    this.retiredDictation?.dispose()
+    this.disposeVoice(this.retiredDictation)
     this.retiredDictation = undefined
     this.checkpoints.dispose()
     this.git.dispose()
+  }
+
+  /** Window ownership retains this drain even after a conversation tab closes. */
+  public async disposeAsync(): Promise<void> {
+    this.dispose()
+    await this.stopVoice()
   }
 
   /**
