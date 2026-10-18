@@ -16,7 +16,8 @@ import { listIntegrationTests } from './lib/integrationTests.mjs'
 // (M90, loaded on the first review), What's New (M99: the page's renderer,
 // content schema and tab, loaded on the first page or notice), the report
 // dialog (M93: the builder, its second scrub, the export paths and the
-// handler, loaded on the first open; dist/report.js) and its flight recorder
+// handler, loaded on the first dialog open or Diagnostics command;
+// dist/report.js) and its flight recorder
 // (the journal, loaded just after activation; dist/recorder.js), the webview,
 // What's New's page script, and (in dev mode) the integration tests with
 // esbuild. It first writes What's New's content, dist/whatsNew.json, from
@@ -205,6 +206,10 @@ const MODELS_PANEL_ENTRY = 'src/host/models/modelsPanelEntry.ts'
 const MODELS_PANEL_OUTFILE = 'dist/modelsPanel.js'
 const MODELS_SUBSCRIPTIONS_ENTRY = 'src/host/models/modelsSubscriptionsEntry.ts'
 const MODELS_SUBSCRIPTIONS_OUTFILE = 'dist/modelsSubscriptions.js'
+// ACTIVATIONROOM: the CLI-backed and workspace command flows, required on
+// the first of those commands.
+const COMMANDS_ENTRY = 'src/host/commands/commandsEntry.ts'
+const COMMANDS_OUTFILE = 'dist/commands.js'
 const USAGE_SERVICE_ENTRY = 'src/runtime/usage/usageServiceEntry.ts'
 const USAGE_COMPANION_ENTRY = 'src/runtime/usage/usageCompanionEntry.ts'
 const USAGE_PANEL_ENTRY = 'src/host/usage/usagePanelEntry.ts'
@@ -824,6 +829,28 @@ const rulesFileOptions = {
   outfile: RULES_FILE_OUTFILE,
 }
 
+// ACTIVATIONROOM: the CLI-backed and workspace command flows, required on
+// the first of those commands. They import no `vscode`, which is not
+// external there, so a stray import fails this build.
+/** @type {import('esbuild').BuildOptions} */
+const commandsOptions = {
+  ...common,
+  plugins: [
+    sharedUiText,
+    sharedValidation,
+    deferredCohort,
+    sharedWire,
+    sharedResourceAdmission,
+    sharedStructuredSchema,
+    sharedModelApiBoundaries,
+  ],
+  entryPoints: [COMMANDS_ENTRY],
+  outfile: COMMANDS_OUTFILE,
+  platform: 'node',
+  format: 'cjs',
+  target: HOST_NODE_TARGET,
+}
+
 /** @type {import('esbuild').BuildOptions} */
 const checkpointStoreOptions = {
   ...common,
@@ -1280,6 +1307,7 @@ if (isWatch) {
     esbuild.context(museCodeReviewerOptions),
     esbuild.context(modelsPanelOptions),
     esbuild.context(modelsSubscriptionsOptions),
+    esbuild.context(commandsOptions),
     esbuild.context(usageServiceOptions),
     esbuild.context(headlessOptions),
     esbuild.context(usageCompanionOptions),
@@ -1397,6 +1425,7 @@ if (isWatch) {
     museCodeReviewer: esbuild.build(museCodeReviewerOptions),
     modelsPanel: esbuild.build(modelsPanelOptions),
     modelsSubscriptions: esbuild.build(modelsSubscriptionsOptions),
+    commands: esbuild.build(commandsOptions),
     usageService: esbuild.build(usageServiceOptions),
     usageCompanion: esbuild.build(usageCompanionOptions),
     usagePanel: esbuild.build(usagePanelOptions),
@@ -1527,6 +1556,7 @@ if (isWatch) {
   reportSize(MUSE_CODE_REVIEWER_OUTFILE)
   reportSize(MODELS_PANEL_OUTFILE)
   reportSize(MODELS_SUBSCRIPTIONS_OUTFILE)
+  reportSize(COMMANDS_OUTFILE)
   reportSize('dist/usageService.js')
   reportSize('dist/usageCompanion.js')
   reportSize('dist/usagePanel.js')
