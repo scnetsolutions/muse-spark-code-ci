@@ -14507,6 +14507,25 @@ CONTRIBUTING.md, "The capacity repository (D122)"; proofs:
 `docs/certification/ciflow.md` (D122). Full record:
 [docs/plan-archive/decisions.md](docs/plan-archive/decisions.md).
 
+### D123 — The provider judges a key; no key is refused for its shape (lane PROVKEYS, 2026-10-12; numbered D108 until the 2026-10-17 merge with main, where D108 is the test overhaul)
+
+No key is ever refused for its looks, on any surface. What decides is the
+provider's own answer to the first authenticated request the product already
+makes (the free model-list key test); a refusal shows the provider's reason.
+The only checks before sending are the ones that protect the person and hold
+for every provider — the value is not empty, has no whitespace or line break
+inside, and is not obviously the wrong thing (a URL, a file path, placeholder
+text) — each asked as a "use it anyway?" question, never a dead end. This
+supersedes M95 lane K's "password box with the preset's live shape check": the
+box accepts any non-blank key, and no preset carries a key-shape field at
+all — the provider judges every key through the free key test, while each
+preset's hint names where the key comes from. Where the person can answer
+(the panel's modal, a terminal prompt), the "use it anyway?" question waits
+for the answer and a "no" asks for the key again; where nothing can answer
+(piped stdin), the run continues to the provider. The endpoint
+policy, log redaction and the product's own Meta-key format are unchanged.
+Full record: [docs/plan-archive/decisions.md](docs/plan-archive/decisions.md).
+
 ## 3. Open questions (need the owner)
 
 **Q-REFUSAL-FALLBACK (lane PROVERRR2, 2026-10-13).** GAPANTH-G11's scan row

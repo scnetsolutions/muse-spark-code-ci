@@ -1,7 +1,7 @@
 // The ACP agent's provider commands (M95, PLAN.md D74): `providers
 // list|add|test|remove` and the key target `auth … --provider <id>` uses.
 // The terminal runs the same checks as the panel's wizard: the preset, the
-// endpoint policy, the key's shape, the free key test and the ticked
+// endpoint policy, the free key test (never the key's shape) and the ticked
 // models, driven through lane P's pure `wizardFlow` state machine, so the
 // rules cannot drift. The draft lives in memory only; the file and the
 // secret are committed once the machine reaches `done`. Reported failures
@@ -18,12 +18,19 @@ import {
   presets,
   wizardFlow,
   providersFile,
+  setUiText as setProvidersUiText,
 } from '../host/backend/providersEntry'
 import type { SecretStore } from '../host/auth/credentialStore'
 const { isCredentialBound } = credentialRecord
 const { checkEndpointUrl } = endpointPolicy
 import type { ProviderPreset } from '../core/providers/presets'
-const { azureOrigin, isKeyShape, OPENROUTER_ATTRIBUTION, presetById } = presets
+const {
+  azureOrigin,
+  inspectProviderKey,
+  providerKeyNoticeText,
+  OPENROUTER_ATTRIBUTION,
+  presetById,
+} = presets
 const { applyWizardEvent, startWizard, wizardBlockers, wizardSummary } = wizardFlow
 import type {
   ProviderEntry,
@@ -42,6 +49,8 @@ import {
 } from '../shared/constants'
 import { fill, plural, uiLocale } from '../shared/l10n/text'
 import type { ProvidersAddOptions } from './cliArgs'
+import { providerKeyFailureText } from './exec/keyInput'
+import { isNonTextStdin } from './hiddenInput'
 import {
   formatStoredProviderSecret,
   parseStoredProviderSecret,
@@ -98,6 +107,12 @@ export interface ProvidersDeps {
   readonly fetch: typeof fetch
   /** One line from the user, not echoed when it comes from a terminal. */
   readonly readSecret: (prompt: string) => Promise<string>
+  /**
+   * Whether to use a key that looks like the wrong thing (a URL, a path,
+   * placeholder text, inner whitespace). A pipe cannot answer, so it names
+   * the value and proceeds; a terminal asks and waits for the answer.
+   */
+  readonly confirmKeyUse: (message: string) => Promise<boolean>
   readonly print: (line: string) => void
   readonly printError: (line: string) => void
 }
@@ -624,18 +639,37 @@ export async function providersAdd(
     if (!options.keyFromStdin) {
       return failed(deps, fill(UI_TEXT.providerKeyNeeded, { provider: id }))
     }
-    const typed = await deps.readSecret(fill(UI_TEXT.providerKeyPrompt, { provider: id }))
-    if (typed.trim() === '') {
-      return failed(deps, UI_TEXT.providerKeyNotStored)
+    // Any non-blank key goes to the free key test: the provider judges
+    // it, never its shape. A value that looks like the wrong thing is
+    // named first. A pipe cannot answer, so the run continues to the
+    // test; a "no" on a terminal asks for the key again, like the panel's
+    // password box. The notice is formatted in the providers bundle, which
+    // keeps its own installed language: install this command's table
+    // before reading it.
+    setProvidersUiText(UI_TEXT, uiLocale())
+    for (;;) {
+      let typed: string
+      try {
+        typed = await deps.readSecret(fill(UI_TEXT.providerKeyPrompt, { provider: id }))
+      } catch (error: unknown) {
+        if (isNonTextStdin(error)) return failed(deps, providerKeyFailureText('invalid'))
+        throw error
+      }
+      if (typed.trim() === '') {
+        return failed(deps, providerKeyFailureText('empty'))
+      }
+      const candidate = typed.trim()
+      const inspection = inspectProviderKey(candidate)
+      if (
+        inspection === 'ok' ||
+        inspection === 'empty' ||
+        (await deps.confirmKeyUse(providerKeyNoticeText(inspection)))
+      ) {
+        key = candidate
+        break
+      }
     }
-    key = typed.trim()
-    if (!isKeyShape(preset.keyShape, key)) {
-      return failed(
-        deps,
-        fill(UI_TEXT.providerKeyShape, { provider: preset.label, hint: preset.keyHint }),
-      )
-    }
-    state = applyWizardEvent(state, { type: 'submit-key', shapeOk: true })
+    state = applyWizardEvent(state, { type: 'submit-key' })
     if (state.error !== undefined) {
       return failed(deps, state.error)
     }
