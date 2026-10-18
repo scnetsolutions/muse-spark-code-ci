@@ -545,6 +545,14 @@ Surfaces: acp:museCode, acp:modelApi. Paid: no extra feature charge; model usage
 
 Commands: —. Settings: —. [Documentation](https://github.com/RandyNorthrup/muse-spark-code#help-and-reference)
 
+### Other CI systems
+
+system: Digest-pinned headless review/fix templates for GitLab, Azure, Jenkins and Bitbucket. Node reads the key and publishes outside the checkout; every template uploads those files. GitLab/Bitbucket external-temp copies and Bitbucket process isolation remain unqualified. Declare extra key binding names in MUSE_CI_KEY_ALIASES. Fake tests only; see docs/ci-other-systems.md.
+
+Surfaces: acp:modelApi. Paid: no extra feature charge; model usage still applies.
+
+Commands: —. Settings: —. [Documentation](https://github.com/RandyNorthrup/muse-spark-code#other-ci-systems)
+
 ### Web Fetch
 
 Fetch public web pages as readable text, with permission and network checks.

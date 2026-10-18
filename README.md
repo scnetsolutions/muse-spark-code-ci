@@ -4938,6 +4938,15 @@ See the [ACP guide](docs/acp.md), the [CI guide](docs/ci.md) and the
 [M80 record](docs/certification/m80.md) for tests, deliberate breaks, platform
 results and what is still open.
 
+### Other CI systems
+
+Templates for GitLab, Azure, Jenkins and Bitbucket live under
+[`ci-templates/`](ci-templates/gitlab-ci.yml); setup is documented in [the
+CI systems guide](docs/ci-other-systems.md). They are not certified or
+supported: no hosted run or release carrying the launcher has been
+demonstrated, so no credential, execution or publication behavior is claimed
+here. (The heading stays because the help reference links this anchor.)
+
 ## Keeping your machine responsive
 
 M107's integration candidate adds one portable governor per harness process.
