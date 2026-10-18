@@ -145,6 +145,7 @@
   "shareDiffs": "Farkları dahil et",
   "sharePreview": "Önizleme",
   "shareConfirm": "Paylaşımı onayla",
+  "shareDestination": "Olarak paylaş",
   "shareCopy": "Kopyala",
   "shareFile": "Dosyayı kaydet…",
   "shareBrowser": "Tarayıcıda aç",
@@ -325,7 +326,8 @@
     "effort": "Muse'un her yanıta ayırdığı çabayı seçin.",
     "output": "Sonuç biçimini seçin: text, json veya jsonl.",
     "max-budget-usd": "Bu çalıştırma için USD cinsinden kesin harcama sınırı belirleyin.",
-    "max-requests": "Maksimum model isteği sayısını belirleyin.",
+    "max-requests": "En fazla istek sayısını belirler. Son model çağrısı araç kullanmadan son bir özet oluşturur.",
+    "max-tool-output-bytes": "Bu çalıştırma için araç sonucu başına bayt sınırını yükseltin.",
     "timeout": "Çalıştırma süresi sınırını saniye olarak belirleyin.",
     "fail-on-denial": "İzin reddedilirse çalıştırmayı durdurun.",
     "ephemeral": "Oturumu kaydetmeden bellekte tutun.",
@@ -932,7 +934,8 @@
   "snapshotTooLong": "Bu konuşma, yeniden yükleme boyunca panelde tutulamayacak kadar uzundu; tamamını görmek için Geçmiş'ten açın.",
   "linkOutsideWorkspace": "Çalışma alanı dışındaki dosyalara giden bağlantılar dökümden açılmaz.",
   "emptyStateHint": "İş için doğru aracı seçmek üzere /model yazın.",
-  "composerPlaceholder": "Muse'a odaklanmak veya odağı bırakmak için ctrl esc (macOS'ta cmd esc, Windows'ta ctrl alt esc)",
+  "composerPlaceholder": "Muse’a sor…",
+  "composerPlaceholderWithShortcut": "Muse’a sor… (odaklanmak için {shortcut})",
   "composerQueuePlaceholder": "Başka bir mesajı kuyruğa ekle…",
   "queuedLabel": "Kuyrukta",
   "queuedMenuLabel": "Kuyruktaki ileti işlemleri",
@@ -986,6 +989,7 @@
   "cliCredentialUnsupported": "Muse Code başlatılamıyor: oturum açma dosyası {path}, Muse Code’un bu sistemde okuyamadığı macOS biçiminde. Bu dosyayı taşıyın veya yeniden adlandırın, ardından yeniden oturum açın.",
   "hostExited": "Muse Code beklenmedik şekilde durdu",
   "hostStarting": "Muse Code başlatılıyor…",
+  "checkingSignIn": "Oturum açma denetleniyor…",
   "hostRestartsOnSend": "Sonraki mesaj onu yeniden başlatır ve bu konuşmayı sürdürür.",
   "turnStoppedByRestart": "Durduruldu: arka uç yeniden başlatıldı",
   "sessionClosedByHost": "Muse Code bu oturumu kapattı",
@@ -2544,7 +2548,7 @@
   "contributorBlocked": "Katkı katmanı modelleri bu çalışma alanında engellendi (museSpark.confidentialWorkspace).",
   "trainingBlocked": "Çalışma alanı içeriğiyle eğitilebilecek modeller bu çalışma alanında engellenmiştir (museSpark.confidentialWorkspace).",
   "backendItem": "Arka uç",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "Bu görüşmeyi hangi motor yürütüyor: otomatik, Muse Code veya Model API.",
   "backendMuseCode": "Muse Code (Muse aboneliğiniz)",
   "backendModelApi": "Meta Model API (anahtarınız, kullandıkça öde)",
   "modelApiBackendNotice": "Bu konuşma, uzantının kendi araçlarıyla (okuma, düzenleme, yazma, arama, listeleme, kabuk) Meta Model API üzerinde çalışır. Oturumları bu çalışma alanının uzantı depolama alanında tutulur.",
@@ -2556,6 +2560,13 @@
   "autoCompactionAwaitingEvaluation": "Otomatik sıkıştırma değerlendirme bekliyor ve etkin değil.",
   "autoCompactionFailed": "Otomatik sıkıştırma başarısız oldu; özgün bağlamla devam ediliyor.",
   "contextWindowFull": "Bağlam penceresi dolu: /compact veya /handoff",
+  "toolResultCutPreview": "Araç sonucu kesildi: {total} karakter, başı ve sonu tutuldu (başta {head} tam satır, sonda {tail} tam satır; {omitted} atlandı). Tam sonuç {spill} içinde. Oturumla birlikte kaldırılır.",
+  "contextWindowTooLong": "Sohbet ({tokens} jeton), bu modelin penceresinden ({maximum} jeton) {over} jeton daha büyük. Sohbeti /compact ile sıkıştırın, penceresi daha büyük bir modele geçin veya yeni bir sohbet başlatın; hiçbir şey silinmedi.",
+  "toolResultCapRefused": "{source} araç çıktısı üst sınırı ({value}) reddedildi ({reason}); varsayılan {fallback} kullanılıyor.",
+  "toolResultCapBelowFloor": "okunabilir {floor} bayt alt sınırının altında",
+  "toolResultCapAboveWindow": "yaklaşık {window} tokenlik model penceresinden büyük",
+  "toolResultSpillFailed": "Aracın tam sonucu {spill} içine kaydedilemedi; yalnızca kesilmiş metin kalır.",
+  "toolResultCutPreviewUnkept": "Araç sonucu kesildi: {total} karakter, başı ve sonu tutuldu ({omitted} atlandı). Tam sonuç kaydedilemedi.",
   "sessionBudgetStopped": "Durduruldu: sonraki istek (yaklaşık {estimate}), {cap} tutarındaki oturum bütçesini aşardı (kullanılan {spent}). Gönderilmedi.",
   "sessionBudgetStoreUnavailable": "Oturum harcama kaydı okunamadı veya kaydedilemedi. Kayıt kullanılabilir olana kadar yeni bir istek gönderilemez.",
   "sessionBudgetLegacyFeesUnknown": "Konuşmanın harcamaları tam olarak doğrulanmadı. Bekleyen isteklerin bitmesini bekleyin veya harcama sınırı kullanmak için yeni bir konuşma başlatın.",
@@ -2670,6 +2681,7 @@
   "agentStopReasons": {
     "normal": "Normal bitiş",
     "budget": "Bütçe tükendi",
+    "limit": "Çağrı sınırına ulaşıldı",
     "error": "Hata",
     "cancelled": "Kullanıcı durdurdu",
     "unknown": "Kullanılamıyor"
@@ -3133,7 +3145,8 @@
     "medium": "Orta",
     "high": "Yüksek",
     "xhigh": "Çok yüksek",
-    "max": "Maksimum"
+    "max": "Maksimum",
+    "ultra": "Ultra"
   },
   "toolLabels": {
     "judge": "Değerlendirici",
@@ -3518,6 +3531,27 @@
     "one": "En fazla {count} girdi dosyasına izin verilir.",
     "other": "En fazla {count} girdi dosyasına izin verilir."
   },
+  "referenceTurnLimit": "Model API turları varsayılan olarak 200 model çağrısı alır. Arayanların mevcut çağrı sınırları geçerlidir. İlk çağrı her zaman araçlarla çalışır: bir yanıt turu normal şekilde tamamlar, bir araç isteği onu istek sınırında bitirir. Araç çalıştıran bir turun son çağrısı araçsız bir özet üretir; devam etmek için bir mesaj gönderin.",
+  "modelApiWrapUpReserved": "Kalan istek son yanıt için ayrılmıştır. Görsel oluşturulmadı.",
+  "modelApiTurnLimit": {
+    "one": "Tur, {count} model çağrısından sonra durdu. Devam etmek için bir mesaj gönderin.",
+    "other": "Tur, {count} model çağrısından sonra durdu. Devam etmek için bir mesaj gönderin."
+  },
+  "modelApiWrapUpTruncated": {
+    "one": "Tur, {count} model çağrısından sonra durdu ve nihai yanıt çıktı sınırıyla kesildi. Kısmi yanıt korunur. Devam etmek için bir mesaj gönderin.",
+    "other": "Tur, {count} model çağrısından sonra durdu ve nihai yanıt çıktı sınırıyla kesildi. Kısmi yanıt korunur. Devam etmek için bir mesaj gönderin."
+  },
+  "modelApiWrapUpHookBlocked": "Bir durdurma kancası daha fazla iş istedi, ancak tur model çağrısı sınırına ulaştı, bu yüzden nihai yanıt geçerlidir.",
+  "modelApiWrapUpFailed": {
+    "one": "Tur {count} model çağrısından sonra durdu, ancak nihai özet üretilemedi ({reason}).",
+    "other": "Tur {count} model çağrısından sonra durdu, ancak nihai özet üretilemedi ({reason})."
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "hız sınırı",
+    "modelError": "model hatası",
+    "budget": "bütçe durağı",
+    "stopped": "durduruldu"
+  },
   "execRequestCapReached": {
     "one": "{count} denemelik istek sınırına ulaşıldı.",
     "other": "{count} denemelik istek sınırına ulaşıldı."
@@ -3545,6 +3579,9 @@
     "one": "Anahtar çalışıyor · {count} model.",
     "other": "Anahtar çalışıyor · {count} model."
   },
+  "providerModelNoToolCalling": "{model}, araç çağrıları onaylanmadığı için kodlama aracısını çalıştıramaz.",
+  "providerAddPickModel": "Bu modellerden birini veya birkaçını --model <id> ile ekleyin (tekrarlanabilir):",
+  "providerAddNeedsModel": "--model <id> ile en az bir model belirtin (tekrarlanabilir).",
   "providerProbeUnreachable": "Sağlayıcıya ulaşılamadı.",
   "providerProbeUnparseable": "Model listesi okunamadı.",
   "providerProbeNoKey": "Anahtar sağlanmadı.",
@@ -4245,6 +4282,7 @@
   "modelUnpriced": "Fiyatsız",
   "modelLocal": "Yerel",
   "modelPlan": "Abonelik",
+  "pickerContributorTier": "Katkıcı",
   "modelFree": "Ücretsiz",
   "modelColumns": {
     "name": "Model",

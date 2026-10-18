@@ -145,6 +145,7 @@
   "shareDiffs": "差分を含める",
   "sharePreview": "プレビュー",
   "shareConfirm": "共有を確定",
+  "shareDestination": "共有方法",
   "shareCopy": "コピー",
   "shareFile": "ファイルを保存…",
   "shareBrowser": "ブラウザーで開く",
@@ -325,7 +326,8 @@
     "effort": "各回答に Muse がかける手間を選びます。",
     "output": "結果形式をtext、json、jsonlから選びます。",
     "max-budget-usd": "この実行の厳格な支出上限をUSDで設定します。",
-    "max-requests": "モデルへのリクエスト上限を設定します。",
+    "max-requests": "リクエストの上限を設定します。最後のモデル呼び出しはツールを使わずに最終要約を作成します。",
+    "max-tool-output-bytes": "この実行のツール結果あたりのバイト上限を引き上げる。",
     "timeout": "実行時間の上限を秒で設定します。",
     "fail-on-denial": "権限が拒否されたら実行を停止します。",
     "ephemeral": "セッションを保存せずメモリに保持します。",
@@ -928,7 +930,8 @@
   "snapshotTooLong": "この会話は長すぎるため、再読み込み後にパネルに保持できませんでした。すべてを表示するには、履歴から開いてください。",
   "linkOutsideWorkspace": "ワークスペース外のファイルへのリンクは、トランスクリプトからは開けません。",
   "emptyStateHint": "/model と入力して、作業に適したモデルを選択します。",
-  "composerPlaceholder": "ctrl esc (macOS では cmd esc、Windows では ctrl alt esc) で Muse のフォーカスを切り替え",
+  "composerPlaceholder": "Museに質問…",
+  "composerPlaceholderWithShortcut": "Museに質問…（フォーカスは{shortcut}）",
   "composerQueuePlaceholder": "別のメッセージをキューに追加…",
   "queuedLabel": "キュー入り",
   "queuedMenuLabel": "キュー内のメッセージの操作",
@@ -982,6 +985,7 @@
   "cliCredentialUnsupported": "Muse Code を起動できません。サインイン ファイル {path} は macOS 形式のため、このシステムの Muse Code では読み取れません。このファイルを移動するか名前を変更してから、もう一度サインインしてください。",
   "hostExited": "Muse Code が予期せず停止しました",
   "hostStarting": "Muse Code を起動しています…",
+  "checkingSignIn": "サインインを確認中…",
   "hostRestartsOnSend": "次のメッセージで再起動し、この会話を続行します。",
   "turnStoppedByRestart": "停止しました: バックエンドが再起動しました",
   "sessionClosedByHost": "Muse Code がこのセッションを閉じました",
@@ -2490,7 +2494,7 @@
   "contributorBlocked": "このワークスペースでは、コントリビューター ティアのモデルはブロックされています (museSpark.confidentialWorkspace)。",
   "trainingBlocked": "ワークスペースの内容で学習される可能性のあるモデルは、このワークスペースではブロックされています (museSpark.confidentialWorkspace)。",
   "backendItem": "バックエンド",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "この会話を実行するエンジン:自動、Muse Code、Model API。",
   "backendMuseCode": "Muse Code (Muse サブスクリプション)",
   "backendModelApi": "Meta Model API (自分のキー、従量課金)",
   "modelApiBackendNotice": "この会話は、拡張機能独自のツール (読み取り、編集、書き込み、検索、一覧、シェル) を使用して Meta Model API で実行されます。セッションはこのワークスペースの拡張機能ストレージに保存されます。",
@@ -2502,6 +2506,13 @@
   "autoCompactionAwaitingEvaluation": "自動コンパクションは評価待ちのため無効です。",
   "autoCompactionFailed": "自動コンパクションに失敗しました。元のコンテキストで続行します。",
   "contextWindowFull": "コンテキストウィンドウがいっぱいです: /compact または /handoff",
+  "toolResultCutPreview": "ツール結果を切り詰めました:{total} 文字のうち冒頭と末尾を保持(冒頭 {head} 行、末尾 {tail} 行の完全な行、{omitted} 文字省略)。完全な結果は {spill} にあります。セッションとともに削除されます。",
+  "contextWindowTooLong": "会話({tokens}トークン)がこのモデルのウィンドウ({maximum}トークン)を{over}トークン上回っています。/compactで会話を圧縮するか、より大きなウィンドウのモデルに切り替えるか、新しい会話を開始してください。何も削除されていません。",
+  "toolResultCapRefused": "{source}のツール出力上限{value}は拒否されました({reason})。デフォルトの{fallback}を使用します。",
+  "toolResultCapBelowFloor": "{floor}バイトの読み取り可能な下限を下回っています",
+  "toolResultCapAboveWindow": "モデルのウィンドウである約{window}トークンを上回っています",
+  "toolResultSpillFailed": "ツールの完全な結果を {spill} に保存できませんでした。切り詰めたテキストだけが残ります。",
+  "toolResultCutPreviewUnkept": "ツール結果を切り詰めました:{total} 文字のうち冒頭と末尾を保持({omitted} 文字省略)。完全な結果は保存できませんでした。",
   "sessionBudgetStopped": "停止しました: 次のリクエスト (約 {estimate}) がセッション予算 {cap} を超えます (使用済み {spent})。送信されませんでした。",
   "sessionBudgetStoreUnavailable": "セッションの支出台帳を読み取りまたは保存できませんでした。台帳が利用可能になるまで新しいリクエストを送信できません。",
   "sessionBudgetLegacyFeesUnknown": "会話の支出は完全には確認されていません。保留中のリクエストが完了するまで待つか、支出上限を使用するために新しい会話を開始してください。",
@@ -2614,6 +2625,7 @@
   "agentStopReasons": {
     "normal": "正常終了",
     "budget": "予算を使い切りました",
+    "limit": "呼び出し上限に達しました",
     "error": "エラー",
     "cancelled": "ユーザーが停止",
     "unknown": "利用不可"
@@ -3068,7 +3080,8 @@
     "medium": "中",
     "high": "高",
     "xhigh": "超高",
-    "max": "最大"
+    "max": "最大",
+    "ultra": "ウルトラ"
   },
   "toolLabels": {
     "judge": "ジャッジ",
@@ -3444,6 +3457,24 @@
   "execTooManyFiles": {
     "other": "入力ファイルの上限は {count} 個です。"
   },
+  "referenceTurnLimit": "Model API のターンは既定で 200 回のモデル呼び出しです。呼び出し側の既存のリクエスト制限が優先されます。最初の呼び出しは常にツール付きで実行されます。回答があればターンは正常に完了し、ツール要求があればリクエスト上限で終了します。ツールを実行したターンの最後の呼び出しはツールなしの要約を生成します。続けるにはメッセージを送信してください。",
+  "modelApiWrapUpReserved": "残りのリクエストは最終回答のために確保されています。画像は生成されませんでした。",
+  "modelApiTurnLimit": {
+    "other": "モデルの呼び出しが {count} 回に達したため、このターンは停止しました。続けるにはメッセージを送信してください。"
+  },
+  "modelApiWrapUpTruncated": {
+    "other": "最終回答が出力上限で途切れたため、このターンはモデルの呼び出しが {count} 回に達して停止しました。部分的な回答は保持されます。続けるにはメッセージを送信してください。"
+  },
+  "modelApiWrapUpHookBlocked": "停止フックが追加の作業を求めましたが、このターンはモデル呼び出しの上限に達したため、最終回答がそのまま残ります。",
+  "modelApiWrapUpFailed": {
+    "other": "ターンはモデル呼び出し{count}回で停止しましたが、最終サマリーを作成できませんでした（{reason}）。"
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "レート制限",
+    "modelError": "モデルエラー",
+    "budget": "予算停止",
+    "stopped": "停止"
+  },
   "execRequestCapReached": {
     "other": "リクエスト試行の上限 {count} 回に達しました。"
   },
@@ -3468,6 +3499,9 @@
   "providerTestOk": {
     "other": "キーは有効です · {count} モデル。"
   },
+  "providerModelNoToolCalling": "{model} はツール呼び出しが確認されていないため、コーディングエージェントを実行できません。",
+  "providerAddPickModel": "これらのモデルの1つ以上を --model <id> で追加してください（繰り返し可）：",
+  "providerAddNeedsModel": "--model <id> で少なくとも1つのモデルを指定してください（繰り返し可）。",
   "providerProbeUnreachable": "プロバイダーに接続できませんでした。",
   "providerProbeUnparseable": "モデル一覧を読み取れませんでした。",
   "providerProbeNoKey": "キーが指定されていません。",
@@ -4132,6 +4166,7 @@
   "modelUnpriced": "価格なし",
   "modelLocal": "ローカル",
   "modelPlan": "プラン",
+  "pickerContributorTier": "コントリビューター",
   "modelFree": "無料",
   "modelColumns": {
     "name": "モデル",

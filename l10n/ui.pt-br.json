@@ -145,6 +145,7 @@
   "shareDiffs": "Incluir diferenças",
   "sharePreview": "Prévia",
   "shareConfirm": "Confirmar compartilhamento",
+  "shareDestination": "Compartilhar como",
   "shareCopy": "Copiar",
   "shareFile": "Salvar arquivo…",
   "shareBrowser": "Abrir no navegador",
@@ -325,7 +326,8 @@
     "effort": "Escolha quanto esforço o Muse dedica a cada resposta.",
     "output": "Escolher o formato do resultado: text, json ou jsonl.",
     "max-budget-usd": "Definir o limite rígido de gastos em USD para esta execução.",
-    "max-requests": "Definir o máximo de solicitações ao modelo.",
+    "max-requests": "Define o número máximo de solicitações. A última chamada ao modelo produz um resumo final sem ferramentas.",
+    "max-tool-output-bytes": "Elevar o limite de bytes por resultado da ferramenta para esta execução.",
     "timeout": "Definir o limite de duração em segundos.",
     "fail-on-denial": "Parar a execução se uma permissão for negada.",
     "ephemeral": "Manter a sessão na memória sem salvá-la.",
@@ -936,7 +938,8 @@
   "snapshotTooLong": "Esta conversa era longa demais para ser mantida no painel após o recarregamento; abra-a no Histórico para vê-la inteira.",
   "linkOutsideWorkspace": "Links para arquivos fora do espaço de trabalho não são abertos pela transcrição.",
   "emptyStateHint": "Digite /model para escolher a ferramenta certa para cada tarefa.",
-  "composerPlaceholder": "ctrl esc (cmd esc no macOS, ctrl alt esc no Windows) para focar ou desfocar o Muse",
+  "composerPlaceholder": "Pergunte ao Muse…",
+  "composerPlaceholderWithShortcut": "Pergunte ao Muse… ({shortcut} para focar)",
   "composerQueuePlaceholder": "Enfileirar outra mensagem…",
   "queuedLabel": "Na fila",
   "queuedMenuLabel": "Ações das mensagens na fila",
@@ -990,6 +993,7 @@
   "cliCredentialUnsupported": "O Muse Code não consegue iniciar: o arquivo de entrada {path} está no formato do macOS, que o Muse Code não consegue ler neste sistema. Mova ou renomeie esse arquivo e entre novamente.",
   "hostExited": "O Muse Code parou inesperadamente",
   "hostStarting": "Iniciando o Muse Code…",
+  "checkingSignIn": "Verificando o login…",
   "hostRestartsOnSend": "A próxima mensagem o reinicia e continua esta conversa.",
   "turnStoppedByRestart": "Parado: o back-end foi reiniciado",
   "sessionClosedByHost": "O Muse Code fechou esta sessão",
@@ -2598,7 +2602,7 @@
   "contributorBlocked": "Os modelos do nível colaborador estão bloqueados neste espaço de trabalho (museSpark.confidentialWorkspace).",
   "trainingBlocked": "Modelos que podem ser treinados com o conteúdo do espaço de trabalho estão bloqueados neste espaço de trabalho (museSpark.confidentialWorkspace).",
   "backendItem": "Back-end",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "Qual mecanismo executa esta conversa: automático, Muse Code ou Model API.",
   "backendMuseCode": "Muse Code (sua assinatura do Muse)",
   "backendModelApi": "Meta Model API (sua chave, pagamento conforme o uso)",
   "modelApiBackendNotice": "Esta conversa é executada na Meta Model API com as ferramentas próprias da extensão (ler, editar, gravar, pesquisar, listar, shell). As sessões dela são mantidas no armazenamento da extensão deste espaço de trabalho.",
@@ -2610,6 +2614,13 @@
   "autoCompactionAwaitingEvaluation": "A compactação automática aguarda avaliação e está inativa.",
   "autoCompactionFailed": "A compactação automática falhou; continuando com o contexto original.",
   "contextWindowFull": "Janela de contexto cheia: /compact ou /handoff",
+  "toolResultCutPreview": "Resultado da ferramenta cortado: {total} caracteres, mantidos o início e o fim ({head} linhas inteiras no início, {tail} no fim; {omitted} omitidos). O resultado completo está em {spill}. É removido com a sessão.",
+  "contextWindowTooLong": "A conversa ({tokens} tokens) é maior que a janela deste modelo ({maximum} tokens) em {over} tokens. /compact a conversa, mude para um modelo com janela maior ou inicie uma nova conversa; nada foi excluído.",
+  "toolResultCapRefused": "O limite {source} de saída da ferramenta de {value} foi recusado ({reason}); usando o padrão de {fallback}.",
+  "toolResultCapBelowFloor": "abaixo do mínimo legível de {floor} bytes",
+  "toolResultCapAboveWindow": "maior que a janela do modelo de cerca de {window} tokens",
+  "toolResultSpillFailed": "Não foi possível manter o resultado completo da ferramenta em {spill}; resta apenas o texto cortado.",
+  "toolResultCutPreviewUnkept": "Resultado da ferramenta cortado: {total} caracteres, mantidos o início e o fim ({omitted} omitidos). Não foi possível manter o resultado completo.",
   "sessionBudgetStopped": "Interrompido: a próxima solicitação (cerca de {estimate}) ultrapassaria o orçamento de sessão de {cap} ({spent} usados). Ela não foi enviada.",
   "sessionBudgetStoreUnavailable": "Não foi possível ler ou salvar o registro de gastos da sessão. Nenhuma nova solicitação pode ser enviada até que ele esteja disponível.",
   "sessionBudgetLegacyFeesUnknown": "Os gastos da conversa não foram totalmente verificados. Aguarde as solicitações pendentes terminarem ou inicie uma nova conversa para usar um limite de gastos.",
@@ -2726,6 +2737,7 @@
   "agentStopReasons": {
     "normal": "Fim normal",
     "budget": "Orçamento esgotado",
+    "limit": "Limite de chamadas atingido",
     "error": "Erro",
     "cancelled": "Parado pelo usuário",
     "unknown": "Indisponível"
@@ -3198,7 +3210,8 @@
     "medium": "Médio",
     "high": "Alto",
     "xhigh": "Muito alto",
-    "max": "Máximo"
+    "max": "Máximo",
+    "ultra": "Ultra"
   },
   "toolLabels": {
     "judge": "Avaliador",
@@ -3592,6 +3605,30 @@
     "other": "São permitidos no máximo {count} arquivos de entrada.",
     "many": "São permitidos no máximo {count} arquivos de entrada."
   },
+  "referenceTurnLimit": "Os turnos da API de modelos têm 200 chamadas ao modelo por padrão. Os limites de chamada existentes dos chamadores prevalecem. A primeira chamada sempre executa com ferramentas: uma resposta conclui o turno normalmente, uma solicitação de ferramenta o encerra no limite de solicitações. A última chamada de um turno que executou ferramentas produz um resumo sem ferramentas; envie uma mensagem para continuar.",
+  "modelApiWrapUpReserved": "A solicitação restante está reservada para a resposta final. A imagem não foi gerada.",
+  "modelApiTurnLimit": {
+    "one": "O turno parou após {count} chamada ao modelo. Envie uma mensagem para continuar.",
+    "other": "O turno parou após {count} chamadas ao modelo. Envie uma mensagem para continuar.",
+    "many": "O turno parou após {count} chamadas ao modelo. Envie uma mensagem para continuar."
+  },
+  "modelApiWrapUpTruncated": {
+    "one": "O turno parou após {count} chamada ao modelo, com a resposta final cortada pelo limite de saída. A resposta parcial foi mantida. Envie uma mensagem para continuar.",
+    "other": "O turno parou após {count} chamadas ao modelo, com a resposta final cortada pelo limite de saída. A resposta parcial foi mantida. Envie uma mensagem para continuar.",
+    "many": "O turno parou após {count} chamadas ao modelo, com a resposta final cortada pelo limite de saída. A resposta parcial foi mantida. Envie uma mensagem para continuar."
+  },
+  "modelApiWrapUpHookBlocked": "Um hook de parada pediu mais trabalho, mas o turno atingiu seu limite de chamadas ao modelo, então a resposta final permanece.",
+  "modelApiWrapUpFailed": {
+    "one": "O turno parou após {count} chamada ao modelo, mas o resumo final não pôde ser produzido ({reason}).",
+    "other": "O turno parou após {count} chamadas ao modelo, mas o resumo final não pôde ser produzido ({reason}).",
+    "many": "O turno parou após {count} chamadas ao modelo, mas o resumo final não pôde ser produzido ({reason})."
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "limite de taxa",
+    "modelError": "erro do modelo",
+    "budget": "limite de orçamento",
+    "stopped": "interrompido"
+  },
   "execRequestCapReached": {
     "one": "O limite de {count} tentativa foi atingido.",
     "other": "O limite de {count} tentativas foi atingido.",
@@ -3622,6 +3659,9 @@
     "other": "A chave funciona · {count} modelos.",
     "many": "A chave funciona · {count} modelos."
   },
+  "providerModelNoToolCalling": "{model} não pode executar o agente de codificação porque as chamadas de ferramenta não estão confirmadas para ele.",
+  "providerAddPickModel": "Adicione um ou mais destes modelos com --model <id> (repetível):",
+  "providerAddNeedsModel": "Passe pelo menos um modelo com --model <id> (repetível).",
   "providerProbeUnreachable": "Não foi possível acessar o provedor.",
   "providerProbeUnparseable": "Não foi possível ler a lista de modelos.",
   "providerProbeNoKey": "Nenhuma chave foi fornecida.",
@@ -4358,6 +4398,7 @@
   "modelUnpriced": "Sem preço",
   "modelLocal": "Local",
   "modelPlan": "Assinatura",
+  "pickerContributorTier": "Colaborador",
   "modelFree": "Grátis",
   "modelColumns": {
     "name": "Modelo",

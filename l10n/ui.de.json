@@ -145,6 +145,7 @@
   "shareDiffs": "Änderungen einschließen",
   "sharePreview": "Vorschau",
   "shareConfirm": "Teilen bestätigen",
+  "shareDestination": "Teilen als",
   "shareCopy": "Kopieren",
   "shareFile": "Datei speichern…",
   "shareBrowser": "Im Browser öffnen",
@@ -325,7 +326,8 @@
     "effort": "Wählen, wie viel Mühe Muse in jede Antwort steckt.",
     "output": "Das Ergebnisformat wählen: text, json oder jsonl.",
     "max-budget-usd": "Das feste Ausgabenlimit in USD für diesen Lauf festlegen.",
-    "max-requests": "Die maximale Anzahl von Modellanfragen festlegen.",
+    "max-requests": "Legt die maximale Anfragezahl fest. Der letzte Modellaufruf erstellt eine abschließende Zusammenfassung ohne Werkzeuge.",
+    "max-tool-output-bytes": "Die Byte-Obergrenze pro Tool-Ergebnis für diesen Lauf anheben.",
     "timeout": "Die Laufzeitgrenze in Sekunden festlegen.",
     "fail-on-denial": "Den Lauf bei verweigerter Berechtigung stoppen.",
     "ephemeral": "Die Sitzung im Speicher halten, ohne sie zu speichern.",
@@ -932,7 +934,8 @@
   "snapshotTooLong": "Diese Unterhaltung war zu lang, um sie beim Neuladen im Panel zu behalten. Öffnen Sie sie über den Verlauf, um sie vollständig zu sehen.",
   "linkOutsideWorkspace": "Links zu Dateien außerhalb des Arbeitsbereichs werden nicht aus dem Transkript geöffnet.",
   "emptyStateHint": "Geben Sie /model ein, um das passende Werkzeug für die Aufgabe zu wählen.",
-  "composerPlaceholder": "Strg+Esc (unter macOS Cmd+Esc, unter Windows Strg+Alt+Esc), um Muse zu fokussieren oder den Fokus zu verlassen",
+  "composerPlaceholder": "Frag Muse…",
+  "composerPlaceholderWithShortcut": "Frag Muse… ({shortcut} zum Fokussieren)",
   "composerQueuePlaceholder": "Weitere Nachricht einreihen…",
   "queuedLabel": "Eingereiht",
   "queuedMenuLabel": "Aktionen für eingereihte Nachrichten",
@@ -986,6 +989,7 @@
   "cliCredentialUnsupported": "Muse Code kann nicht starten: Seine Anmeldedatei {path} liegt im macOS-Format vor, das Muse Code auf diesem System nicht lesen kann. Verschieben Sie diese Datei oder benennen Sie sie um, und melden Sie sich dann erneut an.",
   "hostExited": "Muse Code wurde unerwartet beendet",
   "hostStarting": "Muse Code wird gestartet…",
+  "checkingSignIn": "Anmeldung wird geprüft…",
   "hostRestartsOnSend": "Die nächste Nachricht startet es neu und setzt diese Unterhaltung fort.",
   "turnStoppedByRestart": "Angehalten: Das Backend wurde neu gestartet",
   "sessionClosedByHost": "Muse Code hat diese Sitzung geschlossen",
@@ -2544,7 +2548,7 @@
   "contributorBlocked": "Modelle der Contributor-Stufe sind in diesem Arbeitsbereich gesperrt (museSpark.confidentialWorkspace).",
   "trainingBlocked": "Modelle, die mit Inhalten dieses Arbeitsbereichs trainiert werden können, sind in diesem Arbeitsbereich gesperrt (museSpark.confidentialWorkspace).",
   "backendItem": "Backend",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "Welche Engine diese Unterhaltung führt: automatisch, Muse Code oder die Model API.",
   "backendMuseCode": "Muse Code (Ihr Muse-Abonnement)",
   "backendModelApi": "Meta Model API (Ihr Schlüssel, nutzungsbasiert)",
   "modelApiBackendNotice": "Diese Unterhaltung läuft über die Meta Model API mit den eigenen Tools der Erweiterung (Lesen, Bearbeiten, Schreiben, Suchen, Auflisten, Shell). Ihre Sitzungen werden im Erweiterungsspeicher dieses Arbeitsbereichs aufbewahrt.",
@@ -2556,6 +2560,13 @@
   "autoCompactionAwaitingEvaluation": "Die automatische Komprimierung wartet auf die Auswertung und ist inaktiv.",
   "autoCompactionFailed": "Die automatische Komprimierung ist fehlgeschlagen; der ursprüngliche Kontext wird weiterverwendet.",
   "contextWindowFull": "Kontextfenster voll: /compact oder /handoff",
+  "toolResultCutPreview": "Tool-Ergebnis gekürzt: {total} Zeichen, Anfang und Ende behalten ({head} ganze Zeilen am Anfang, {tail} am Ende; {omitted} ausgelassen). Das vollständige Ergebnis steht in {spill}. Es wird mit der Sitzung entfernt.",
+  "contextWindowTooLong": "Die Unterhaltung ({tokens} Token) ist um {over} Token größer als das Fenster dieses Modells ({maximum} Token). /compact ausführen, zu einem Modell mit größerem Fenster wechseln oder eine neue Unterhaltung beginnen; nichts wurde gelöscht.",
+  "toolResultCapRefused": "Die {source}-Obergrenze für Tool-Ausgaben von {value} ist abgelehnt ({reason}); Standard von {fallback} wird verwendet.",
+  "toolResultCapBelowFloor": "unter der lesbaren Untergrenze von {floor} Byte",
+  "toolResultCapAboveWindow": "größer als das Fenster des Modells von etwa {window} Token",
+  "toolResultSpillFailed": "Das vollständige Tool-Ergebnis konnte nicht in {spill} gespeichert werden; nur der gekürzte Text bleibt.",
+  "toolResultCutPreviewUnkept": "Tool-Ergebnis gekürzt: {total} Zeichen, Anfang und Ende behalten ({omitted} ausgelassen). Das vollständige Ergebnis konnte nicht gespeichert werden.",
   "sessionBudgetStopped": "Angehalten: Die nächste Anfrage (ca. {estimate}) würde das Sitzungsbudget von {cap} überschreiten ({spent} verbraucht). Sie wurde nicht gesendet.",
   "sessionBudgetStoreUnavailable": "Das Ausgabenprotokoll der Sitzung konnte nicht gelesen oder gespeichert werden. Bis es verfügbar ist, kann keine neue Anfrage gesendet werden.",
   "sessionBudgetLegacyFeesUnknown": "Die Ausgaben der Unterhaltung sind nicht vollständig bestätigt. Warten Sie auf ausstehende Anfragen oder starten Sie eine neue Unterhaltung, um ein Ausgabenlimit zu verwenden.",
@@ -2670,6 +2681,7 @@
   "agentStopReasons": {
     "normal": "Normal beendet",
     "budget": "Budget ausgeschöpft",
+    "limit": "Aufruflimit erreicht",
     "error": "Fehler",
     "cancelled": "Vom Benutzer gestoppt",
     "unknown": "Nicht verfügbar"
@@ -3133,7 +3145,8 @@
     "medium": "Mittel",
     "high": "Hoch",
     "xhigh": "Sehr hoch",
-    "max": "Maximal"
+    "max": "Maximal",
+    "ultra": "Ultra"
   },
   "toolLabels": {
     "judge": "Beurteiler",
@@ -3518,6 +3531,27 @@
     "one": "Höchstens {count} Eingabedatei ist erlaubt.",
     "other": "Höchstens {count} Eingabedateien sind erlaubt."
   },
+  "referenceTurnLimit": "Model-API-Durchgänge haben standardmäßig 200 Modellaufrufe. Bestehende Aufruflimits von Aufrufern gewinnen. Der erste Aufruf läuft immer mit Werkzeugen: Eine Antwort schließt den Durchgang normal ab, eine Werkzeuganfrage beendet ihn am Anfrage-Limit. Der letzte Aufruf eines Durchgangs mit Werkzeugrunden liefert eine Zusammenfassung ohne Werkzeuge; senden Sie eine Nachricht, um fortzufahren.",
+  "modelApiWrapUpReserved": "Die verbleibende Anfrage ist für die abschließende Antwort reserviert. Das Bild wurde nicht erzeugt.",
+  "modelApiTurnLimit": {
+    "one": "Der Durchgang wurde nach {count} Modellaufruf angehalten. Senden Sie eine Nachricht, um fortzufahren.",
+    "other": "Der Durchgang wurde nach {count} Modellaufrufen angehalten. Senden Sie eine Nachricht, um fortzufahren."
+  },
+  "modelApiWrapUpTruncated": {
+    "one": "Der Durchgang wurde nach {count} Modellaufruf angehalten, wobei die endgültige Antwort durch das Ausgabelimit abgeschnitten wurde. Die Teilantwort bleibt erhalten. Senden Sie eine Nachricht, um fortzufahren.",
+    "other": "Der Durchgang wurde nach {count} Modellaufrufen angehalten, wobei die endgültige Antwort durch das Ausgabelimit abgeschnitten wurde. Die Teilantwort bleibt erhalten. Senden Sie eine Nachricht, um fortzufahren."
+  },
+  "modelApiWrapUpHookBlocked": "Ein Stopp-Hook hat um weitere Arbeit gebeten, aber der Durchgang hat sein Modellaufruf-Limit erreicht, daher bleibt die endgültige Antwort bestehen.",
+  "modelApiWrapUpFailed": {
+    "one": "Der Durchgang wurde nach {count} Modellaufruf gestoppt, aber die endgültige Zusammenfassung konnte nicht erstellt werden ({reason}).",
+    "other": "Der Durchgang wurde nach {count} Modellaufrufen gestoppt, aber die endgültige Zusammenfassung konnte nicht erstellt werden ({reason})."
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "Ratenlimit",
+    "modelError": "Modellfehler",
+    "budget": "Budgetstopp",
+    "stopped": "gestoppt"
+  },
   "execRequestCapReached": {
     "one": "Das Anfragenlimit von {count} Versuch wurde erreicht.",
     "other": "Das Anfragenlimit von {count} Versuchen wurde erreicht."
@@ -3545,6 +3579,9 @@
     "one": "Schlüssel funktioniert · {count} Modell.",
     "other": "Schlüssel funktioniert · {count} Modelle."
   },
+  "providerModelNoToolCalling": "{model} kann den Coding-Agenten nicht ausführen, weil Tool-Aufrufe dafür nicht bestätigt sind.",
+  "providerAddPickModel": "Fügen Sie eines oder mehrere dieser Modelle mit --model <id> hinzu (wiederholbar):",
+  "providerAddNeedsModel": "Geben Sie mindestens ein Modell mit --model <id> an (wiederholbar).",
   "providerProbeUnreachable": "Der Anbieter konnte nicht erreicht werden.",
   "providerProbeUnparseable": "Die Modellliste konnte nicht gelesen werden.",
   "providerProbeNoKey": "Es wurde kein Schlüssel übergeben.",
@@ -4245,6 +4282,7 @@
   "modelUnpriced": "Ohne Preis",
   "modelLocal": "Lokal",
   "modelPlan": "Abo",
+  "pickerContributorTier": "Mitwirkender",
   "modelFree": "Kostenlos",
   "modelColumns": {
     "name": "Modell",

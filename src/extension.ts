@@ -107,6 +107,7 @@ import {
   type UsageRecording,
 } from './core/usage/recording'
 import { MuseCodeHost } from './core/backends/musecode/MuseCodeHost'
+import type { UsageNotesBundle } from './core/backends/musecode/usageDeltas'
 import { agentDataFolder } from './runtime/dataFolder'
 import { requireFile } from './host/lazyBundle'
 import { isJudgeEngineOn } from './core/judge/engine'
@@ -258,8 +259,6 @@ import { createCliFeatures } from './host/cliFeatures'
 import {
   bundledSkillsLoader,
   createBundledSkillsOffer,
-  runBundledSkillsInstall,
-  runBundledSkillsRemove,
   type BundledSkillsCommandDeps,
 } from './host/skills/bundledSkills'
 import { hasClaimedVersion, createWhatsNew } from './host/whatsNew/whatsNew'
@@ -672,6 +671,17 @@ function isUsageInsightsBundle(value: unknown): value is {
   )
 }
 
+function isUsageNotesBundle(value: unknown): value is UsageNotesBundle {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    'MuseUsageDeltas' in value &&
+    typeof value.MuseUsageDeltas === 'function' &&
+    'museCodeLimitInput' in value &&
+    typeof value.museCodeLimitInput === 'function'
+  )
+}
+
 /** A signal that ends a process, as the recorder's vocabulary names it. */
 const EXIT_SIGNAL = /\bSIG[A-Z]{2,6}\b/
 
@@ -766,6 +776,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   })
   MuseCodeHost.usageRecording = usageRecording
   ModelApiBackendManager.usageRecording = usageRecording
+  // The live journal writers ride with the usage service bundle (PLAN.md D6):
+  // sessions construct them on first use instead of carrying them at startup.
+  MuseCodeHost.usageNotesLoader = () => {
+    const bundle: unknown = requireFile(path.join(context.extensionPath, 'dist', 'usageService.js'))
+    if (!isUsageNotesBundle(bundle)) throw new Error(UI_TEXT.actionFailed)
+    return bundle
+  }
   context.subscriptions.push({
     dispose: () => {
       void usageRecording.flush()
@@ -1834,6 +1851,10 @@ async function activateWindow(
             }
       },
       cliSignIn: (isUserAction) => cliAccount.signIn(isUserAction),
+      // First start shows a signed-in file's answer before the refresh's
+      // remaining reads answer (F60); anything the file cannot settle waits
+      // for the probe.
+      peekCliSignIn: () => cliAccount.peekFile(),
       abandonCliProbe: () => {
         cliAccount.abandonProbe()
       },
@@ -2404,7 +2425,6 @@ async function activateWindow(
     status: () => bundledSkillsBundle().bundledSkillsStatus(bundledSkillsPaths()),
   })
   const bundledSkillsCommand = (): BundledSkillsCommandDeps => ({
-    bundle: bundledSkillsBundle,
     paths: bundledSkillsPaths,
     platform: process.platform,
     now: () => Date.now(),
@@ -2423,6 +2443,13 @@ async function activateWindow(
     restart: () => restartMuseCode('the bundled skills changed'),
     log,
   })
+  // The two commands load with the installer they run (dist/bundledSkills.js,
+  // PLAN.md D6), in this window's language; a missing bundle refuses the run
+  // and the next run tries again.
+  const installBundledSkills = (): Promise<void> =>
+    bundledSkillsBundle().runBundledSkillsInstall(bundledSkillsCommand(), UI_TEXT, uiLocale())
+  const removeBundledSkills = (): Promise<void> =>
+    bundledSkillsBundle().runBundledSkillsRemove(bundledSkillsCommand(), UI_TEXT, uiLocale())
   // What's New after an update (M99, PLAN.md D79): decided at the end of
   // activation, shown once the window is quiet (no turn running, no edit for
   // a moment), its page from its own bundle. The last edit's time tells quiet.
@@ -2795,6 +2822,7 @@ async function activateWindow(
     codeIntel: languageServices,
     isRepoMapInPrompt: () => currentSettings().modelApiRepoMap,
     isObservationPackingOn: () => currentSettings().modelApiObservationPacking,
+    maxToolOutputBytes: () => currentSettings().modelApiMaxToolOutputBytes,
     pacingOwner: requestPacingOwner,
     isAutoCompactionOn: () => currentSettings().modelApiAutoCompaction,
     autoCompactionEvaluated: () => IS_AUTO_COMPACTION_EVALUATED,
@@ -3161,7 +3189,7 @@ async function activateWindow(
       // The bundled skills' offer (M89): Install and Update are the same steps.
       case 'installBundledSkills':
       case 'updateBundledSkills': {
-        await runBundledSkillsInstall(bundledSkillsCommand())
+        await installBundledSkills()
         break
       }
       case 'declineBundledSkills': {
@@ -4757,12 +4785,8 @@ async function activateWindow(
       void vscode.window.showInformationMessage(UI_TEXT.museCodeRestarted)
     }),
     // M89 (PLAN.md D68): the bundled skills into Muse Code's folders, and out.
-    registerLoggedCommand(log, COMMAND_IDS.installBundledSkills, () =>
-      runBundledSkillsInstall(bundledSkillsCommand()),
-    ),
-    registerLoggedCommand(log, COMMAND_IDS.removeBundledSkills, () =>
-      runBundledSkillsRemove(bundledSkillsCommand()),
-    ),
+    registerLoggedCommand(log, COMMAND_IDS.installBundledSkills, installBundledSkills),
+    registerLoggedCommand(log, COMMAND_IDS.removeBundledSkills, removeBundledSkills),
     registerLoggedCommand(log, COMMAND_IDS.showWhatsNew, () => {
       whatsNew.show()
     }),

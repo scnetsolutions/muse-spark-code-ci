@@ -145,6 +145,7 @@
   "shareDiffs": "차이점 포함",
   "sharePreview": "미리 보기",
   "shareConfirm": "공유 확인",
+  "shareDestination": "공유 방식",
   "shareCopy": "복사",
   "shareFile": "파일 저장…",
   "shareBrowser": "브라우저에서 열기",
@@ -325,7 +326,8 @@
     "effort": "각 답변에 Muse가 들이는 노력을 선택합니다.",
     "output": "결과 형식을 text, json 또는 jsonl로 선택합니다.",
     "max-budget-usd": "이 실행의 엄격한 지출 한도를 USD로 설정합니다.",
-    "max-requests": "최대 모델 요청 수를 설정합니다.",
+    "max-requests": "최대 요청 수를 설정합니다. 마지막 모델 호출은 도구 없이 최종 요약을 작성합니다.",
+    "max-tool-output-bytes": "이번 실행의 도구 결과당 바이트 상한을 높입니다.",
     "timeout": "실행 시간 제한을 초 단위로 설정합니다.",
     "fail-on-denial": "권한이 거부되면 실행을 중지합니다.",
     "ephemeral": "저장하지 않고 세션을 메모리에 유지합니다.",
@@ -928,7 +930,8 @@
   "snapshotTooLong": "이 대화는 너무 길어서 다시 로드한 후 패널에 유지할 수 없었습니다. 전체 내용을 보려면 기록에서 여세요.",
   "linkOutsideWorkspace": "작업 영역 외부 파일에 대한 링크는 대화 내용에서 열 수 없습니다.",
   "emptyStateHint": "/model을 입력하여 작업에 맞는 모델을 선택하세요.",
-  "composerPlaceholder": "ctrl esc(macOS에서는 cmd esc, Windows에서는 ctrl alt esc)로 Muse 포커스 전환",
+  "composerPlaceholder": "Muse에게 질문…",
+  "composerPlaceholderWithShortcut": "Muse에게 질문…({shortcut}로 포커스)",
   "composerQueuePlaceholder": "다른 메시지를 대기열에 추가…",
   "queuedLabel": "대기 중",
   "queuedMenuLabel": "대기 중인 메시지 작업",
@@ -982,6 +985,7 @@
   "cliCredentialUnsupported": "Muse Code를 시작할 수 없습니다. 로그인 파일 {path}이(가) macOS 형식이라 이 시스템의 Muse Code가 읽을 수 없습니다. 이 파일을 옮기거나 이름을 바꾼 뒤 다시 로그인하세요.",
   "hostExited": "Muse Code가 예기치 않게 중지되었습니다",
   "hostStarting": "Muse Code를 시작하는 중…",
+  "checkingSignIn": "로그인 확인 중…",
   "hostRestartsOnSend": "다음 메시지를 보내면 다시 시작되고 이 대화가 계속됩니다.",
   "turnStoppedByRestart": "중지됨: 백엔드가 다시 시작되었습니다",
   "sessionClosedByHost": "Muse Code가 이 세션을 닫았습니다",
@@ -2490,7 +2494,7 @@
   "contributorBlocked": "이 작업 영역에서는 기여자 등급 모델이 차단되어 있습니다(museSpark.confidentialWorkspace).",
   "trainingBlocked": "작업 공간 콘텐츠로 학습될 수 있는 모델은 이 작업 공간에서 차단됩니다(museSpark.confidentialWorkspace).",
   "backendItem": "백엔드",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "이 대화를 실행할 엔진: 자동, Muse Code 또는 Model API.",
   "backendMuseCode": "Muse Code(Muse 구독)",
   "backendModelApi": "Meta Model API(사용자 키, 종량제)",
   "modelApiBackendNotice": "이 대화는 확장 자체 도구(읽기, 편집, 쓰기, 검색, 목록, 셸)를 사용하여 Meta Model API에서 실행됩니다. 세션은 이 작업 영역의 확장 저장소에 보관됩니다.",
@@ -2502,6 +2506,13 @@
   "autoCompactionAwaitingEvaluation": "자동 압축은 평가를 기다리고 있으며 비활성 상태입니다.",
   "autoCompactionFailed": "자동 압축에 실패했습니다. 원래 컨텍스트로 계속 진행합니다.",
   "contextWindowFull": "컨텍스트 창이 가득 찼습니다: /compact 또는 /handoff",
+  "toolResultCutPreview": "도구 결과가 잘렸습니다. 전체 {total}자 중 시작과 끝을 유지했습니다(시작 부분 {head}개, 끝 부분 {tail}개의 완전한 줄, {omitted}자 생략). 전체 결과는 {spill}에 있습니다. 세션과 함께 삭제됩니다.",
+  "contextWindowTooLong": "대화({tokens} 토큰)가 이 모델의 창({maximum} 토큰)보다 {over} 토큰 큽니다. /compact로 대화를 압축하거나, 창이 더 큰 모델로 바꾸거나, 새 대화를 시작하세요. 삭제된 것은 없습니다.",
+  "toolResultCapRefused": "{source} 도구 출력 상한 {value}이(가) 거부되었습니다({reason}). 기본값 {fallback}을(를) 사용합니다.",
+  "toolResultCapBelowFloor": "읽을 수 있는 하한 {floor}바이트 미만",
+  "toolResultCapAboveWindow": "모델 창인 약 {window}개 토큰 초과",
+  "toolResultSpillFailed": "도구의 전체 결과를 {spill}에 보관하지 못했습니다. 잘린 텍스트만 남습니다.",
+  "toolResultCutPreviewUnkept": "도구 결과가 잘렸습니다. 전체 {total}자 중 시작과 끝을 유지했습니다({omitted}자 생략). 전체 결과를 보관하지 못했습니다.",
   "sessionBudgetStopped": "중지됨: 다음 요청(약 {estimate})이 세션 예산 {cap}을(를) 초과합니다(사용 {spent}). 전송되지 않았습니다.",
   "sessionBudgetStoreUnavailable": "세션 지출 기록을 읽거나 저장할 수 없습니다. 기록을 사용할 수 있을 때까지 새 요청을 전송할 수 없습니다.",
   "sessionBudgetLegacyFeesUnknown": "대화의 지출이 완전히 검증되지 않았습니다. 대기 중인 요청이 끝날 때까지 기다리거나 지출 한도를 사용하려면 새 대화를 시작하세요.",
@@ -2614,6 +2625,7 @@
   "agentStopReasons": {
     "normal": "정상 종료",
     "budget": "예산 소진",
+    "limit": "호출 한도 도달",
     "error": "오류",
     "cancelled": "사용자가 중지함",
     "unknown": "사용 불가"
@@ -3068,7 +3080,8 @@
     "medium": "보통",
     "high": "높음",
     "xhigh": "매우 높음",
-    "max": "최대"
+    "max": "최대",
+    "ultra": "울트라"
   },
   "toolLabels": {
     "judge": "판단자",
@@ -3444,6 +3457,24 @@
   "execTooManyFiles": {
     "other": "입력 파일은 최대 {count}개까지 허용됩니다."
   },
+  "referenceTurnLimit": "Model API 턴은 기본적으로 200회의 모델 호출을 사용합니다. 호출자의 기존 요청 한도가 우선합니다. 첫 호출은 항상 도구를 사용해 실행됩니다. 답변이 있으면 턴이 정상 완료되고, 도구 요청이 있으면 요청 한도에서 종료됩니다. 도구를 실행한 턴의 마지막 호출은 도구 없이 요약을 생성합니다. 계속하려면 메시지를 보내세요.",
+  "modelApiWrapUpReserved": "남은 요청은 최종 답변을 위해 예약되었습니다. 이미지는 생성되지 않았습니다.",
+  "modelApiTurnLimit": {
+    "other": "모델 호출이 {count}회에 도달하여 턴이 중지되었습니다. 계속하려면 메시지를 보내세요."
+  },
+  "modelApiWrapUpTruncated": {
+    "other": "최종 답변이 출력 한도로 잘리면서 모델 호출이 {count}회에 도달하여 턴이 중지되었습니다. 부분 답변은 유지됩니다. 계속하려면 메시지를 보내세요."
+  },
+  "modelApiWrapUpHookBlocked": "중지 훅이 추가 작업을 요청했지만 턴이 모델 호출 한도에 도달했으므로 최종 답변이 유지됩니다.",
+  "modelApiWrapUpFailed": {
+    "other": "턴이 모델 호출 {count}회 후에 중단되었지만 최종 요약을 생성하지 못했습니다({reason})."
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "속도 제한",
+    "modelError": "모델 오류",
+    "budget": "예산 중단",
+    "stopped": "중단됨"
+  },
   "execRequestCapReached": {
     "other": "요청 시도 한도 {count}회에 도달했습니다."
   },
@@ -3468,6 +3499,9 @@
   "providerTestOk": {
     "other": "키가 작동합니다 · 모델 {count}개."
   },
+  "providerModelNoToolCalling": "{model}은(는) 도구 호출이 확인되지 않아 코딩 에이전트를 실행할 수 없습니다.",
+  "providerAddPickModel": "이러한 모델 중 하나 이상을 --model <id>(으)로 추가하세요(반복 가능):",
+  "providerAddNeedsModel": "--model <id>(으)로 모델을 하나 이상 지정하세요(반복 가능).",
   "providerProbeUnreachable": "공급자에 연결할 수 없습니다.",
   "providerProbeUnparseable": "모델 목록을 읽을 수 없습니다.",
   "providerProbeNoKey": "키가 제공되지 않았습니다.",
@@ -4132,6 +4166,7 @@
   "modelUnpriced": "가격 없음",
   "modelLocal": "로컬",
   "modelPlan": "구독",
+  "pickerContributorTier": "기여자",
   "modelFree": "무료",
   "modelColumns": {
     "name": "모델",

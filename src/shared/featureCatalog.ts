@@ -89,6 +89,7 @@ const SETTING_CONDITIONS: Readonly<
 
   schedules: 'scheduleRuntime=unbound&backend=museCode',
   modelApiObservationPacking: 'conversationStart',
+  modelApiMaxToolOutputBytes: 'conversationStart',
   modelApiAutoCompaction: 'conversationStart&modelPricing',
   modelApiStrictTools: 'conversationStart&tools.strict',
   modelApiParallelReads: 'conversationStart',
@@ -428,6 +429,17 @@ export function featureCatalog(): readonly Feature[] {
       [],
       [],
       'observation-packing-model-api',
+      ['modelApi'],
+      false,
+      ['vscode', 'acp'],
+    ),
+    feature(
+      'tool-result-bound',
+      { setting: 'modelApiMaxToolOutputBytes' },
+      { setting: 'modelApiMaxToolOutputBytes' },
+      [],
+      ['modelApiMaxToolOutputBytes'],
+      'limits',
       ['modelApi'],
       false,
       ['vscode', 'acp'],
@@ -1183,6 +1195,7 @@ const REFERENCE_DETAILS: Readonly<
   cache: ['referenceCache'],
   'custom-agents': ['referencePaidContexts'],
   'conversation-actions': [
+    'referenceTurnLimit',
     'referenceWindowsSessions',
     'restoreFilesToHere',
     'rewindAndRestore',

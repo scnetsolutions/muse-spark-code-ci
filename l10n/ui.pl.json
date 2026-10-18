@@ -145,6 +145,7 @@
   "shareDiffs": "Uwzględnij różnice",
   "sharePreview": "Podgląd",
   "shareConfirm": "Potwierdź udostępnianie",
+  "shareDestination": "Udostępnij jako",
   "shareCopy": "Kopiuj",
   "shareFile": "Zapisz plik…",
   "shareBrowser": "Otwórz w przeglądarce",
@@ -325,7 +326,8 @@
     "effort": "Wybierz, ile wysiłku Muse wkłada w każdą odpowiedź.",
     "output": "Wybierz format wyniku: text, json lub jsonl.",
     "max-budget-usd": "Ustaw twardy limit wydatków w USD dla tego uruchomienia.",
-    "max-requests": "Ustaw maksymalną liczbę żądań do modelu.",
+    "max-requests": "Ustawia maksymalną liczbę żądań. Ostatnie wywołanie modelu tworzy końcowe podsumowanie bez narzędzi.",
+    "max-tool-output-bytes": "Podnieść limit bajtów na wynik narzędzia dla tego uruchomienia.",
     "timeout": "Ustaw limit czasu uruchomienia w sekundach.",
     "fail-on-denial": "Zatrzymaj uruchomienie po odmowie uprawnienia.",
     "ephemeral": "Trzymaj sesję w pamięci bez zapisywania.",
@@ -940,7 +942,8 @@
   "snapshotTooLong": "Ta rozmowa była zbyt długa, aby zachować ją w panelu po ponownym załadowaniu; otwórz ją z Historii, aby zobaczyć całość.",
   "linkOutsideWorkspace": "Linki do plików spoza obszaru roboczego nie są otwierane z zapisu rozmowy.",
   "emptyStateHint": "Wpisz /model, aby wybrać odpowiednie narzędzie do zadania.",
-  "composerPlaceholder": "ctrl esc (cmd esc w systemie macOS, ctrl alt esc w systemie Windows), aby ustawić fokus na Muse lub go zdjąć",
+  "composerPlaceholder": "Zapytaj Muse…",
+  "composerPlaceholderWithShortcut": "Zapytaj Muse… ({shortcut}, aby ustawić fokus)",
   "composerQueuePlaceholder": "Dodaj kolejną wiadomość do kolejki…",
   "queuedLabel": "W kolejce",
   "queuedMenuLabel": "Działania wiadomości w kolejce",
@@ -994,6 +997,7 @@
   "cliCredentialUnsupported": "Nie można uruchomić Muse Code: jego plik logowania {path} ma format systemu macOS, którego Muse Code nie może odczytać w tym systemie. Przenieś ten plik lub zmień jego nazwę, a potem zaloguj się ponownie.",
   "hostExited": "Muse Code nieoczekiwanie się zatrzymał",
   "hostStarting": "Uruchamianie Muse Code…",
+  "checkingSignIn": "Sprawdzanie logowania…",
   "hostRestartsOnSend": "Następna wiadomość uruchomi go ponownie i będzie kontynuować tę rozmowę.",
   "turnStoppedByRestart": "Zatrzymano: backend został uruchomiony ponownie",
   "sessionClosedByHost": "Muse Code zamknął tę sesję",
@@ -2652,7 +2656,7 @@
   "contributorBlocked": "Modele z poziomu Contributor są zablokowane w tym obszarze roboczym (museSpark.confidentialWorkspace).",
   "trainingBlocked": "Modele, które mogą uczyć się na treści obszaru roboczego, są zablokowane w tym obszarze roboczym (museSpark.confidentialWorkspace).",
   "backendItem": "Backend",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "Który silnik prowadzi tę rozmowę: automatyczny, Muse Code czy Model API.",
   "backendMuseCode": "Muse Code (Twoja subskrypcja Muse)",
   "backendModelApi": "Meta Model API (Twój klucz, płatność za użycie)",
   "modelApiBackendNotice": "Ta rozmowa działa na Meta Model API z własnymi narzędziami rozszerzenia (odczyt, edycja, zapis, wyszukiwanie, lista, powłoka). Jej sesje są przechowywane w magazynie rozszerzenia dla tego obszaru roboczego.",
@@ -2664,6 +2668,13 @@
   "autoCompactionAwaitingEvaluation": "Automatyczna kompakcja oczekuje na ocenę i jest nieaktywna.",
   "autoCompactionFailed": "Automatyczna kompakcja nie powiodła się; kontynuowanie z pierwotnym kontekstem.",
   "contextWindowFull": "Okno kontekstu jest pełne: /compact lub /handoff",
+  "toolResultCutPreview": "Wynik narzędzia przycięty: {total} znaków, zachowano początek i koniec ({head} pełnych wierszy na początku, {tail} na końcu; pominięto {omitted}). Pełny wynik znajduje się w {spill}. Jest usuwany wraz z sesją.",
+  "contextWindowTooLong": "Rozmowa ({tokens} tokenów) jest większa od okna tego modelu ({maximum} tokenów) o {over} tokenów. /compact rozmowę, przełącz się na model z większym oknem lub rozpocznij nową rozmowę; nic nie usunięto.",
+  "toolResultCapRefused": "Limit {source} danych wyjściowych narzędzia wynoszący {value} został odrzucony ({reason}); używana jest wartość domyślna {fallback}.",
+  "toolResultCapBelowFloor": "poniżej czytelnego minimum {floor} bajtów",
+  "toolResultCapAboveWindow": "większy niż okno modelu wynoszące około {window} tokenów",
+  "toolResultSpillFailed": "Nie udało się zachować pełnego wyniku narzędzia w {spill}; pozostaje tylko przycięty tekst.",
+  "toolResultCutPreviewUnkept": "Wynik narzędzia przycięty: {total} znaków, zachowano początek i koniec (pominięto {omitted}). Nie udało się zachować pełnego wyniku.",
   "sessionBudgetStopped": "Zatrzymano: następne żądanie (ok. {estimate}) przekroczyłoby budżet sesji {cap} (wykorzystano {spent}). Nie zostało wysłane.",
   "sessionBudgetStoreUnavailable": "Nie można odczytać ani zapisać rejestru wydatków sesji. Do czasu jego udostępnienia nie można wysłać nowego żądania.",
   "sessionBudgetLegacyFeesUnknown": "Wydatki rozmowy nie są w pełni zweryfikowane. Poczekaj na zakończenie oczekujących żądań lub rozpocznij nową rozmowę, aby korzystać z limitu wydatków.",
@@ -2782,6 +2793,7 @@
   "agentStopReasons": {
     "normal": "Normalne zakończenie",
     "budget": "Budżet wyczerpany",
+    "limit": "Osiągnięto limit wywołań",
     "error": "Błąd",
     "cancelled": "Zatrzymane przez użytkownika",
     "unknown": "Niedostępne"
@@ -3263,7 +3275,8 @@
     "medium": "Średni",
     "high": "Wysoki",
     "xhigh": "Bardzo wysoki",
-    "max": "Maksymalny"
+    "max": "Maksymalny",
+    "ultra": "Ultra"
   },
   "toolLabels": {
     "judge": "Oceniający",
@@ -3666,6 +3679,33 @@
     "few": "Limit plików wejściowych: {count}.",
     "many": "Limit plików wejściowych: {count}."
   },
+  "referenceTurnLimit": "Tury Model API mają domyślnie 200 wywołań modelu. Obowiązują istniejące limity wywołań wywołujących. Pierwsze wywołanie zawsze działa z narzędziami: odpowiedź kończy turę normalnie, żądanie narzędzia kończy ją na limicie żądań. Ostatnie wywołanie tury, która uruchamiała narzędzia, daje podsumowanie bez narzędzi; wyślij wiadomość, aby kontynuować.",
+  "modelApiWrapUpReserved": "Pozostałe żądanie jest zarezerwowane na końcową odpowiedź. Obraz nie został wygenerowany.",
+  "modelApiTurnLimit": {
+    "one": "Tura zatrzymała się po {count} wywołaniu modelu. Wyślij wiadomość, aby kontynuować.",
+    "other": "Tura zatrzymała się po {count} wywołaniach modelu. Wyślij wiadomość, aby kontynuować.",
+    "few": "Tura zatrzymała się po {count} wywołaniach modelu. Wyślij wiadomość, aby kontynuować.",
+    "many": "Tura zatrzymała się po {count} wywołaniach modelu. Wyślij wiadomość, aby kontynuować."
+  },
+  "modelApiWrapUpTruncated": {
+    "one": "Tura zatrzymała się po {count} wywołaniu modelu, a ostateczna odpowiedź została ucięta przez limit wyjścia. Częściowa odpowiedź została zachowana. Wyślij wiadomość, aby kontynuować.",
+    "few": "Tura zatrzymała się po {count} wywołaniach modelu, a ostateczna odpowiedź została ucięta przez limit wyjścia. Częściowa odpowiedź została zachowana. Wyślij wiadomość, aby kontynuować.",
+    "many": "Tura zatrzymała się po {count} wywołaniach modelu, a ostateczna odpowiedź została ucięta przez limit wyjścia. Częściowa odpowiedź została zachowana. Wyślij wiadomość, aby kontynuować.",
+    "other": "Tura zatrzymała się po {count} wywołaniach modelu, a ostateczna odpowiedź została ucięta przez limit wyjścia. Częściowa odpowiedź została zachowana. Wyślij wiadomość, aby kontynuować."
+  },
+  "modelApiWrapUpHookBlocked": "Hook zatrzymania poprosił o dalszą pracę, ale tura osiągnęła limit wywołań modelu, więc ostateczna odpowiedź zostaje.",
+  "modelApiWrapUpFailed": {
+    "one": "Tura zatrzymała się po {count} wywołaniu modelu, ale nie udało się utworzyć podsumowania końcowego ({reason}).",
+    "other": "Tura zatrzymała się po {count} wywołaniach modelu, ale nie udało się utworzyć podsumowania końcowego ({reason}).",
+    "few": "Tura zatrzymała się po {count} wywołaniach modelu, ale nie udało się utworzyć podsumowania końcowego ({reason}).",
+    "many": "Tura zatrzymała się po {count} wywołaniach modelu, ale nie udało się utworzyć podsumowania końcowego ({reason})."
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "limit szybkości",
+    "modelError": "błąd modelu",
+    "budget": "limit budżetu",
+    "stopped": "zatrzymano"
+  },
   "execRequestCapReached": {
     "one": "Osiągnięto limit {count} próby.",
     "other": "Osiągnięto limit prób: {count}.",
@@ -3699,6 +3739,9 @@
     "few": "Klucz działa · {count} modele.",
     "many": "Klucz działa · {count} modeli."
   },
+  "providerModelNoToolCalling": "{model} nie może uruchomić agenta kodowania, ponieważ wywoływanie narzędzi nie zostało dla niego potwierdzone.",
+  "providerAddPickModel": "Dodaj co najmniej jeden z tych modeli za pomocą --model <id> (powtarzalne):",
+  "providerAddNeedsModel": "Podaj co najmniej jeden model za pomocą --model <id> (powtarzalne).",
   "providerProbeUnreachable": "Nie można połączyć się z dostawcą.",
   "providerProbeUnparseable": "Nie można odczytać listy modeli.",
   "providerProbeNoKey": "Nie podano klucza.",
@@ -4471,6 +4514,7 @@
   "modelUnpriced": "Bez ceny",
   "modelLocal": "Lokalny",
   "modelPlan": "Subskrypcja",
+  "pickerContributorTier": "Współtwórca",
   "modelFree": "Bezpłatny",
   "modelColumns": {
     "name": "Model",

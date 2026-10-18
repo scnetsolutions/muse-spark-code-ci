@@ -145,6 +145,7 @@
   "shareDiffs": "包含差異",
   "sharePreview": "預覽",
   "shareConfirm": "確認分享",
+  "shareDestination": "共用為",
   "shareCopy": "複製",
   "shareFile": "儲存檔案…",
   "shareBrowser": "在瀏覽器中開啟",
@@ -325,7 +326,8 @@
     "effort": "選擇 Muse 在每則回答上投入的心力。",
     "output": "選擇結果格式：text、json或jsonl。",
     "max-budget-usd": "以USD設定本次執行的硬性支出上限。",
-    "max-requests": "設定模型請求次數上限。",
+    "max-requests": "設定請求數量上限。最後一次模型呼叫不使用工具並產生最終摘要。",
+    "max-tool-output-bytes": "提高本次執行的單個工具結果位元組上限。",
     "timeout": "以秒設定執行時間上限。",
     "fail-on-denial": "權限遭拒時停止執行。",
     "ephemeral": "將工作階段保留在記憶體中，不儲存。",
@@ -928,7 +930,8 @@
   "snapshotTooLong": "此對話過長，重新載入後無法完整保留在面板中；請從歷程記錄開啟以檢視全部內容。",
   "linkOutsideWorkspace": "不會從對話記錄開啟指向工作區外檔案的連結。",
   "emptyStateHint": "輸入 /model，為手邊的工作選擇合適的模型。",
-  "composerPlaceholder": "按 ctrl esc（macOS 上為 cmd esc，Windows 上為 ctrl alt esc）聚焦或取消聚焦 Muse",
+  "composerPlaceholder": "問 Muse…",
+  "composerPlaceholderWithShortcut": "問 Muse…（按 {shortcut} 聚焦）",
   "composerQueuePlaceholder": "將另一則訊息排入佇列…",
   "queuedLabel": "排入佇列",
   "queuedMenuLabel": "佇列中訊息的動作",
@@ -982,6 +985,7 @@
   "cliCredentialUnsupported": "Muse Code 無法啟動：其登入檔案 {path} 為 macOS 格式，此系統上的 Muse Code 無法讀取。請移動或重新命名該檔案，然後重新登入。",
   "hostExited": "Muse Code 意外停止",
   "hostStarting": "正在啟動 Muse Code…",
+  "checkingSignIn": "正在檢查登入狀態…",
   "hostRestartsOnSend": "下一則訊息會重新啟動它並繼續此對話。",
   "turnStoppedByRestart": "已停止：後端已重新啟動",
   "sessionClosedByHost": "Muse Code 已關閉此工作階段",
@@ -2490,7 +2494,7 @@
   "contributorBlocked": "此工作區已封鎖貢獻者層級模型（museSpark.confidentialWorkspace）。",
   "trainingBlocked": "可能會使用工作區內容進行訓練的模型在此工作區中已被封鎖 (museSpark.confidentialWorkspace)。",
   "backendItem": "後端",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "哪個引擎執行此對話：自動、Muse Code 或 Model API。",
   "backendMuseCode": "Muse Code（您的 Muse 訂閱）",
   "backendModelApi": "Meta Model API（您的金鑰，隨用隨付）",
   "modelApiBackendNotice": "此對話在 Meta Model API 上執行，並使用延伸模組本身的工具（讀取、編輯、寫入、搜尋、列出、shell）。其工作階段會保存在此工作區的延伸模組儲存空間中。",
@@ -2502,6 +2506,13 @@
   "autoCompactionAwaitingEvaluation": "自動壓縮正在等待評估，目前未啟用。",
   "autoCompactionFailed": "自動壓縮失敗；繼續使用原始上下文。",
   "contextWindowFull": "上下文視窗已滿：/compact 或 /handoff",
+  "toolResultCutPreview": "工具結果已截斷:共 {total} 個字元,保留了開頭和結尾(開頭 {head} 整行,結尾 {tail} 整行;省略了 {omitted} 個字元)。完整結果位於 {spill}。它會隨工作階段一併刪除。",
+  "contextWindowTooLong": "對話（{tokens}個詞元）比此模型的視窗（{maximum}個詞元）大{over}個詞元。請/compact壓縮對話、切換到視窗更大的模型或開始新對話；沒有任何內容被刪除。",
+  "toolResultCapRefused": "{source}工具輸出上限{value}被拒絕（{reason}）；改用預設值{fallback}。",
+  "toolResultCapBelowFloor": "低於可讀下限 {floor} 位元組",
+  "toolResultCapAboveWindow": "大於約 {window} 個詞元的模型視窗",
+  "toolResultSpillFailed": "無法將完整的工具結果保存在 {spill} 中;僅保留截斷後的文字。",
+  "toolResultCutPreviewUnkept": "工具結果已截斷:共 {total} 個字元,保留了開頭和結尾(省略了 {omitted} 個字元)。完整結果未能保存。",
   "sessionBudgetStopped": "已停止：下一個要求（約 {estimate}）將超出階段預算 {cap}（已使用 {spent}）。該要求未傳送。",
   "sessionBudgetStoreUnavailable": "無法讀取或儲存階段支出記錄。在記錄可用之前，無法傳送新要求。",
   "sessionBudgetLegacyFeesUnknown": "對話支出尚未完全驗證。請等待待處理要求完成，或開始新對話以使用支出上限。",
@@ -2614,6 +2625,7 @@
   "agentStopReasons": {
     "normal": "正常結束",
     "budget": "預算耗盡",
+    "limit": "已達到呼叫上限",
     "error": "錯誤",
     "cancelled": "使用者停止",
     "unknown": "無法使用"
@@ -3068,7 +3080,8 @@
     "medium": "中",
     "high": "高",
     "xhigh": "超高",
-    "max": "最高"
+    "max": "最高",
+    "ultra": "終極"
   },
   "toolLabels": {
     "judge": "評判器",
@@ -3444,6 +3457,24 @@
   "execTooManyFiles": {
     "other": "最多允許 {count} 個輸入檔案。"
   },
+  "referenceTurnLimit": "Model API 每輪預設可呼叫模型 200 次。呼叫方現有的請求上限優先。首次呼叫一律攜帶工具執行：有回答則本輪正常完成，有工具請求則在本輪達到請求上限時結束。執行過工具的輪次，其最後一次呼叫產生不帶工具的摘要；傳送訊息以繼續。",
+  "modelApiWrapUpReserved": "剩餘請求已保留用於最終回答。影像未產生。",
+  "modelApiTurnLimit": {
+    "other": "本輪在呼叫模型 {count} 次後停止。傳送訊息以繼續。"
+  },
+  "modelApiWrapUpTruncated": {
+    "other": "最終回答被輸出上限截斷，本輪在呼叫模型 {count} 次後停止。部分回答已保留。傳送訊息以繼續。"
+  },
+  "modelApiWrapUpHookBlocked": "停止鉤子要求了更多工作，但本輪已達到模型呼叫上限，因此最終回答保持不變。",
+  "modelApiWrapUpFailed": {
+    "other": "本輪在 {count} 次模型呼叫後停止，但未能產生最終摘要（{reason}）。"
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "速率受限",
+    "modelError": "模型錯誤",
+    "budget": "預算停止",
+    "stopped": "已停止"
+  },
   "execRequestCapReached": {
     "other": "已達到 {count} 次請求嘗試的上限。"
   },
@@ -3468,6 +3499,9 @@
   "providerTestOk": {
     "other": "金鑰有效 · {count} 個模型。"
   },
+  "providerModelNoToolCalling": "{model} 無法執行編碼代理，因為尚未確認其工具呼叫能力。",
+  "providerAddPickModel": "使用 --model <id> 新增其中一個或多個模型（可重複）：",
+  "providerAddNeedsModel": "請使用 --model <id> 至少指定一個模型（可重複）。",
   "providerProbeUnreachable": "無法連線至提供者。",
   "providerProbeUnparseable": "無法讀取模型清單。",
   "providerProbeNoKey": "未提供金鑰。",
@@ -4132,6 +4166,7 @@
   "modelUnpriced": "無定價",
   "modelLocal": "本機",
   "modelPlan": "訂閱",
+  "pickerContributorTier": "貢獻者",
   "modelFree": "免費",
   "modelColumns": {
     "name": "模型",

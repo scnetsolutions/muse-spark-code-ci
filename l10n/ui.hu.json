@@ -145,6 +145,7 @@
   "shareDiffs": "Eltérések bevonása",
   "sharePreview": "Előnézet",
   "shareConfirm": "Megosztás megerősítése",
+  "shareDestination": "Megosztás mint",
   "shareCopy": "Másolás",
   "shareFile": "Fájl mentése…",
   "shareBrowser": "Megnyitás böngészőben",
@@ -325,7 +326,8 @@
     "effort": "Válassza ki, mennyi erőfeszítést tegyen a Muse az egyes válaszokba.",
     "output": "Az eredmény formátumának kiválasztása: text, json vagy jsonl.",
     "max-budget-usd": "A futtatás szigorú kiadási korlátjának megadása USD-ben.",
-    "max-requests": "A modellkérések maximális számának beállítása.",
+    "max-requests": "Beállítja a kérések maximális számát. Az utolsó modellhívás eszközök nélküli végső összefoglalót készít.",
+    "max-tool-output-bytes": "Eszközkimenetenkénti bájt-korlát megemelése erre a futásra.",
     "timeout": "A futtatás határidejének beállítása másodpercben.",
     "fail-on-denial": "A futtatás leállítása elutasított engedélynél.",
     "ephemeral": "A munkamenet megőrzése memóriában mentés nélkül.",
@@ -932,7 +934,8 @@
   "snapshotTooLong": "Ez a beszélgetés túl hosszú volt ahhoz, hogy az újratöltés során a panelen maradjon; a teljes beszélgetéshez nyissa meg az Előzményekből.",
   "linkOutsideWorkspace": "A munkaterületen kívüli fájlokra mutató hivatkozások nem nyílnak meg az átiratból.",
   "emptyStateHint": "Írja be a /model parancsot, hogy a feladathoz illő eszközt válassza.",
-  "composerPlaceholder": "Ctrl+Esc (macOS-en Cmd+Esc, Windowson Ctrl+Alt+Esc): a Muse fókuszba hozása vagy a fókusz elhagyása",
+  "composerPlaceholder": "Kérdezz Muse-tól…",
+  "composerPlaceholderWithShortcut": "Kérdezz Muse-tól… ({shortcut} a fókuszhoz)",
   "composerQueuePlaceholder": "Újabb üzenet sorba állítása…",
   "queuedLabel": "Sorba állítva",
   "queuedMenuLabel": "Sorba állított üzenetek műveletei",
@@ -986,6 +989,7 @@
   "cliCredentialUnsupported": "A Muse Code nem tud elindulni: a bejelentkezési fájlja ({path}) macOS-formátumú, amelyet a Muse Code ezen a rendszeren nem tud beolvasni. Helyezze át vagy nevezze át ezt a fájlt, majd jelentkezzen be újra.",
   "hostExited": "A Muse Code váratlanul leállt",
   "hostStarting": "A Muse Code indítása…",
+  "checkingSignIn": "Bejelentkezés ellenőrzése…",
   "hostRestartsOnSend": "A következő üzenet újraindítja, és folytatja ezt a beszélgetést.",
   "turnStoppedByRestart": "Leállítva: a háttérrendszer újraindult",
   "sessionClosedByHost": "A Muse Code bezárta ezt a munkamenetet",
@@ -2544,7 +2548,7 @@
   "contributorBlocked": "A contributor-szintű modellek le vannak tiltva ezen a munkaterületen (museSpark.confidentialWorkspace).",
   "trainingBlocked": "Azok a modellek, amelyek a munkaterület tartalmával taníthatók, ebben a munkaterületben le vannak tiltva (museSpark.confidentialWorkspace).",
   "backendItem": "Háttérrendszer",
-  "backendDetail": "museSpark.backend: auto / museCode / modelApi",
+  "backendDetail": "Melyik motor futtatja ezt a beszélgetést: automatikus, Muse Code vagy a Model API.",
   "backendMuseCode": "Muse Code (az Ön Muse-előfizetése)",
   "backendModelApi": "Meta Model API (saját kulcs, használatalapú díjszabás)",
   "modelApiBackendNotice": "Ez a beszélgetés a Meta Model API-n fut a kiegészítő saját eszközeivel (olvasás, szerkesztés, írás, keresés, listázás, shell). A munkamenetei ennek a munkaterületnek a kiegészítő-tárolójában maradnak.",
@@ -2556,6 +2560,13 @@
   "autoCompactionAwaitingEvaluation": "Az automatikus tömörítés értékelésre vár, és inaktív.",
   "autoCompactionFailed": "Az automatikus tömörítés sikertelen; folytatás az eredeti kontextussal.",
   "contextWindowFull": "A kontextusablak megtelt: /compact vagy /handoff",
+  "toolResultCutPreview": "Eszköz eredménye levágva: {total} karakter, az eleje és a vége maradt meg ({head} egész sor az elején, {tail} a végén; {omitted} kihagyva). A teljes eredmény itt van: {spill}. A munkamenettel együtt törlődik.",
+  "contextWindowTooLong": "A beszélgetés ({tokens} token) {over} tokennel nagyobb e modell ablakánál ({maximum} token). /compact segítségével tömörítse a beszélgetést, váltson nagyobb ablakú modellre, vagy kezdjen új beszélgetést; semmi sem lett törölve.",
+  "toolResultCapRefused": "A(z) {source} eszközkimeneti korlát ({value}) elutasítva ({reason}); az alapértelmezett {fallback} lesz használva.",
+  "toolResultCapBelowFloor": "az olvasható {floor} bájtos alsó határ alatt",
+  "toolResultCapAboveWindow": "nagyobb a modell körülbelül {window} tokenes ablakánál",
+  "toolResultSpillFailed": "A teljes eszköz eredményét nem sikerült megőrizni itt: {spill}; csak a levágott szöveg marad.",
+  "toolResultCutPreviewUnkept": "Eszköz eredménye levágva: {total} karakter, az eleje és a vége maradt meg ({omitted} kihagyva). A teljes eredményt nem sikerült megőrizni.",
   "sessionBudgetStopped": "Megállt: a következő kérés (kb. {estimate}) átlépné a(z) {cap} munkamenet-keretet (felhasználva {spent}). Nem lett elküldve.",
   "sessionBudgetStoreUnavailable": "A munkamenet kiadási naplója nem olvasható vagy menthető. Új kérés nem küldhető, amíg a napló nem érhető el.",
   "sessionBudgetLegacyFeesUnknown": "A beszélgetés kiadásai nincsenek teljesen ellenőrizve. Várja meg a függő kérések befejezését, vagy kezdjen új beszélgetést a kiadási korlát használatához.",
@@ -2670,6 +2681,7 @@
   "agentStopReasons": {
     "normal": "Normál befejezés",
     "budget": "Keret kimerült",
+    "limit": "Híváskorlát elérve",
     "error": "Hiba",
     "cancelled": "Felhasználó leállította",
     "unknown": "Nem elérhető"
@@ -3133,7 +3145,8 @@
     "medium": "Közepes",
     "high": "Magas",
     "xhigh": "Nagyon magas",
-    "max": "Maximális"
+    "max": "Maximális",
+    "ultra": "Ultra"
   },
   "toolLabels": {
     "judge": "Értékelő",
@@ -3518,6 +3531,27 @@
     "one": "Legfeljebb {count} bemeneti fájl engedélyezett.",
     "other": "Legfeljebb {count} bemeneti fájl engedélyezett."
   },
+  "referenceTurnLimit": "A Model API-körök alapértelmezésben 200 modellhívást kapnak. A hívók meglévő híváskorlátai az irányadók. Az első hívás mindig eszközökkel fut: a válasz normálisan lezárja a kört, az eszközhívás a kéréskorlátnál fejezi be. Az eszközöket futtató kör utolsó hívása eszközök nélküli összefoglalót ad; a folytatáshoz küldjön üzenetet.",
+  "modelApiWrapUpReserved": "A fennmaradó kérés a végső válaszhoz van fenntartva. A kép nem készült el.",
+  "modelApiTurnLimit": {
+    "one": "A kör {count} modellhívás után leállt. A folytatáshoz küldjön üzenetet.",
+    "other": "A kör {count} modellhívás után leállt. A folytatáshoz küldjön üzenetet."
+  },
+  "modelApiWrapUpTruncated": {
+    "one": "A kör {count} modellhívás után leállt, a végső választ pedig a kimeneti korlát vágta le. A részleges válasz megmarad. A folytatáshoz küldjön üzenetet.",
+    "other": "A kör {count} modellhívás után leállt, a végső választ pedig a kimeneti korlát vágta le. A részleges válasz megmarad. A folytatáshoz küldjön üzenetet."
+  },
+  "modelApiWrapUpHookBlocked": "Egy leállítási hook további munkát kért, de a kör elérte a modellhívási korlátot, így a végső válasz érvényben marad.",
+  "modelApiWrapUpFailed": {
+    "one": "A kör {count} modellhívás után leállt, de a végső összefoglalót nem sikerült elkészíteni ({reason}).",
+    "other": "A kör {count} modellhívás után leállt, de a végső összefoglalót nem sikerült elkészíteni ({reason})."
+  },
+  "modelApiWrapUpFailedReason": {
+    "rateLimited": "sebességkorlát",
+    "modelError": "modellhiba",
+    "budget": "költségkeret-leállítás",
+    "stopped": "leállítva"
+  },
   "execRequestCapReached": {
     "one": "A kérések elérték a(z) {count} próbás korlátot.",
     "other": "A kérések elérték a(z) {count} próbás korlátot."
@@ -3545,6 +3579,9 @@
     "one": "A kulcs működik · {count} modell.",
     "other": "A kulcs működik · {count} modell."
   },
+  "providerModelNoToolCalling": "{model} nem tudja futtatni a kódoló ügynököt, mert az eszközhívások nincsenek megerősítve hozzá.",
+  "providerAddPickModel": "Adja hozzá e modellek közül egyet vagy többet a --model <id> kapcsolóval (ismételhető):",
+  "providerAddNeedsModel": "Adjon meg legalább egy modellt a --model <id> kapcsolóval (ismételhető).",
   "providerProbeUnreachable": "A szolgáltató nem érhető el.",
   "providerProbeUnparseable": "A modelllista nem olvasható.",
   "providerProbeNoKey": "Nincs megadva kulcs.",
@@ -4245,6 +4282,7 @@
   "modelUnpriced": "Ár nélkül",
   "modelLocal": "Helyi",
   "modelPlan": "Előfizetés",
+  "pickerContributorTier": "Közreműködő",
   "modelFree": "Ingyenes",
   "modelColumns": {
     "name": "Modell",
