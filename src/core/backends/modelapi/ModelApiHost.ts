@@ -129,7 +129,6 @@ import {
   MODEL_API_HOOK_PROVIDER,
   MODEL_API_LEGACY_CONTEXT_MODELS,
   MODEL_API_MAX_OUTPUT_TOKENS,
-  MODEL_API_MAX_RETRIES,
   MODEL_API_MAX_TOOL_ROUNDS,
   MODEL_API_MEDIA_PER_REQUEST,
   MODEL_API_MODEL_PREFIX,
@@ -177,7 +176,6 @@ import {
   TOOL_STATUS_INTERRUPTED,
   UI_TEXT,
   USER_SHELL_ITEM_KIND,
-  USER_SHELL_TIMEOUT_MS,
   VERIFY_COMMAND_RULE_KEY,
   VERIFY_NOTE_MAX_CHARS,
   VERIFY_TOOLS,
@@ -319,6 +317,7 @@ import {
   type RetryNotice,
   type ResponseAttemptGuard,
 } from './client'
+import { canRetryWithinBudget } from './transport'
 import { isDefiniteRefusal, scrubRefusalLeak } from './providerRefusal'
 import {
   applyGoalCommand,
@@ -6005,7 +6004,7 @@ export class ModelApiSession implements ScheduledAgentSession {
           !hasRecoveredMedia &&
           !signal.aborted &&
           this.media !== undefined &&
-          budget.retriesUsed < MODEL_API_MAX_RETRIES &&
+          canRetryWithinBudget(budget, budget.retriesUsed) &&
           (await this.media.recover(
             error,
             this.replay.map((entry) => entry.item),
@@ -6020,7 +6019,7 @@ export class ModelApiSession implements ScheduledAgentSession {
         if (
           !(error instanceof RetryableStreamError) ||
           signal.aborted ||
-          budget.retriesUsed >= MODEL_API_MAX_RETRIES
+          !canRetryWithinBudget(budget, budget.retriesUsed)
         ) {
           throw error
         }
@@ -6032,7 +6031,6 @@ export class ModelApiSession implements ScheduledAgentSession {
           type: 'turnRetry',
           turnId,
           attempt: attempt + 1,
-          maxAttempts: MODEL_API_MAX_RETRIES + 1,
           retryDelayMs: delayMs,
           reason: `${error.code}: ${error.message}`,
         })
@@ -6149,7 +6147,6 @@ export class ModelApiSession implements ScheduledAgentSession {
         type: 'turnRetry',
         turnId,
         attempt: notice.attempt,
-        maxAttempts: notice.maxAttempts,
         retryDelayMs: notice.delayMs,
         reason: notice.reason,
       })
@@ -13218,10 +13215,12 @@ export class ModelApiSession implements ScheduledAgentSession {
     const startedAt = this.deps.now()
     let result: ShellResult
     try {
+      // No deadline of its own: the user's command runs until it ends or
+      // the row's Stop ends it (owner 2026-10-16), saying so out loud.
       result = await this.deps.io.runShell(
         command,
         this.deps.workspaceRoot,
-        USER_SHELL_TIMEOUT_MS,
+        undefined,
         stop.signal,
         undefined,
         this.userShellAdmission(stop),
@@ -13241,7 +13240,7 @@ export class ModelApiSession implements ScheduledAgentSession {
     } finally {
       this.userShells.delete(started.itemId)
     }
-    const outcome = shellOutcome(result, USER_SHELL_TIMEOUT_MS)
+    const outcome = shellOutcome(result, undefined)
     // A refused entry ran nothing: its row says so, and the model is told
     // nothing about a command that never started.
     const isRefused = result.isEntryRefused === true && !stop.signal.aborted
@@ -14503,7 +14502,6 @@ export class ModelApiSession implements ScheduledAgentSession {
               type: 'turnRetry',
               turnId,
               attempt: notice.attempt,
-              maxAttempts: notice.maxAttempts,
               retryDelayMs: notice.delayMs,
               reason: notice.reason,
             })
@@ -14596,7 +14594,7 @@ export class ModelApiSession implements ScheduledAgentSession {
           !(error instanceof RetryableStreamError) ||
           signal.aborted ||
           (!wasBudgetLimited && this.goal?.status === GOAL_STATUS.budgetLimited) ||
-          budget.retriesUsed >= MODEL_API_MAX_RETRIES
+          !canRetryWithinBudget(budget, budget.retriesUsed)
         ) {
           throw error
         }
@@ -14607,7 +14605,6 @@ export class ModelApiSession implements ScheduledAgentSession {
           type: 'turnRetry',
           turnId,
           attempt: retry + 1,
-          maxAttempts: MODEL_API_MAX_RETRIES + 1,
           retryDelayMs: delayMs,
           reason: `${error.code}: ${error.message}`,
         })
@@ -17026,7 +17023,8 @@ export class ModelApiSession implements ScheduledAgentSession {
             body,
             signal,
             undefined,
-            { retriesUsed: MODEL_API_MAX_RETRIES },
+            // The judge names no retries: one send, then its verdict stands.
+            { retriesUsed: 0, maxRetries: 0 },
             guard,
           )
           for await (const event of stream) {
@@ -17719,8 +17717,12 @@ export class ModelApiHost implements AgentHost {
     return this.deps.client.readPlanUsage?.() ?? []
   }
 
-  public async listModels(sessionId?: string): Promise<readonly ModelSummary[]> {
-    const ids = this.deps.hasMetaCredential?.() === false ? [] : await this.deps.client.listModels()
+  public async listModels(
+    sessionId?: string,
+    signal?: AbortSignal,
+  ): Promise<readonly ModelSummary[]> {
+    const ids =
+      this.deps.hasMetaCredential?.() === false ? [] : await this.deps.client.listModels(signal)
     const providers = (await this.deps.models?.list?.()) ?? []
     const active = sessionId === undefined ? undefined : this.sessions.get(sessionId)?.modelId
     return [
