@@ -14507,6 +14507,58 @@ CONTRIBUTING.md, "The capacity repository (D122)"; proofs:
 `docs/certification/ciflow.md` (D122). Full record:
 [docs/plan-archive/decisions.md](docs/plan-archive/decisions.md).
 
+### D203 — `/playback`: the agent plays back its understanding, from memory only (owner, 2026-10-17)
+
+The owner, verbatim: "i want to add a slash command /playback this should
+have the agent report its current understanding of the goal, or
+instructions, from its working memory no scans or files checks. the goal of
+this is to give the user an accurate view of what the agent thiks vs what
+the goal or instruction was so they have a way to confirm whether or not
+the agent uderstood the task or whatever properly."
+
+- **What it is.** `/playback` in the current conversation asks the agent to
+  state, only from what it already holds in its working memory (the
+  conversation context): the goal and the instructions and constraints it
+  follows; what it has done and is doing now; what it will do next; what it
+  is unsure of or assumed; and anything else that shapes how it will act
+  ("etc" is everything else not mentioned). The reply opens with the fixed
+  marker `My playback — my own understanding, from memory only:`, so the
+  person knows it is the agent's own understanding to compare and correct.
+  It takes no arguments: `/playback` with anything after it answers usage.
+- **No scans, no file reads, no tools — enforced in code, not by wording.**
+  The turn's prompt says what to report and that no tools are available,
+  and the harness refuses every tool call in code for that turn: on the
+  Model API backend (Meta and every M95 provider through it) the turn is
+  offered no tools at all and `decideAndRun` refuses any call, answered to
+  the model as refused, in every mode, Bypass included (the M70 Reviewer
+  gate's stricter sibling). On Muse Code there is no backend-enforced
+  zero-tool turn (MSP is "select, never create": no approval mode denies
+  reads, and the file tools edit without asking even in Plan — SECURITY.md
+  "Muse Code's file writes"), so `/playback` is refused there instead of
+  sent as an ordinary turn a reactive stop might reach too late (Codex P2
+  thread on PR #221, 2026-10-17). External agents get the prompt text
+  only, where they accept a prompt.
+- **One turn of the conversation, on the Model API backend, on every surface.** The panel
+  (palette row, typed text, host message, controller turn with the send
+  barrier, checkpoint and busy refusals shared with reviews), the terminal
+  and ACP editors (the ACP agent's command list and prompt interception,
+  which `exec` rides in-process), and other editors through the shared
+  core. A message sent while a playback starts waits for it; one playback
+  at a time. It is part of the user's own turn, so nothing asks for
+  payment. The playback turn's text loads with the
+  review bundle, as a review's does. Listed in the slash-command list, the
+  Help reference and the README, with real translations in all 14
+  languages.
+- **How it differs from the comparables.** Claude Code's bundled skills
+  and custom commands are prompt-based (`/doctor`, `/code-review`):
+  detailed instructions, tools still available
+  (`https://code.claude.com/docs/en/slash-commands.md`, fetched
+  2026-10-17). `/playback` is the opposite trade: the prompt asks only
+  for a memory report, and the harness makes tool use impossible (Model
+  API; refused on Muse Code, which has no zero-tool turn), so the answer
+  can only come from memory.
+- Record: `docs/certification/playback.md`.
+
 ## 3. Open questions (need the owner)
 
 **Q-REFUSAL-FALLBACK (lane PROVERRR2, 2026-10-13).** GAPANTH-G11's scan row
