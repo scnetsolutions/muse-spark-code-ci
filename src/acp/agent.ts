@@ -57,6 +57,10 @@ import { editAutomaticallyChoice } from '../core/agent/approvalRules'
 import { failureForLog } from '../core/backends/musecode/logText'
 import { wireWordForLog } from '../core/logging'
 import { resolveResumedModel } from '../core/backends/musecode/resumedModel'
+import {
+  isLinuxSandboxBlocked,
+  type LinuxSandboxReadiness,
+} from '../core/backends/musecode/sandbox'
 import { unlessAborted } from '../core/timeouts'
 import type { CoreLogger } from '../core/logging'
 import { type PaidUseAnswer, paidUseQuestion } from '../core/paid/paidConsent'
@@ -79,6 +83,7 @@ import {
   MAX_ATTACHMENTS_PER_MESSAGE,
   type PermissionMode,
   QUESTION_DEFER_DEFAULT_SECONDS,
+  SANDBOX_CANNOT_START_MODEL_NOTE,
   UI_TEXT,
   SLASH_COMMAND_NAMES,
 } from '../shared/constants'
@@ -148,6 +153,11 @@ export interface AcpBackend {
   readonly readiness: (isRecheck: boolean) => Promise<BackendReadiness>
   /** The host for a folder, started on first use. */
   readonly hostFor: (cwd: string) => Promise<AgentHost>
+  /**
+   * What the Linux capability probe measured (F91); absent where it does
+   * not apply, while no host has started, or where the backend predates it.
+   */
+  readonly shellSandboxReadiness?: (cwd: string) => LinuxSandboxReadiness | undefined
 }
 
 export interface AcpAgentOptions {
@@ -348,6 +358,10 @@ class AcpSession {
   private skills: readonly SkillSummary[] = []
   private areCommandsAnnounced = false
   private hasShownResourcePause = false
+  /** F91: the editor heard once that Muse Code's Linux sandbox cannot start here. */
+  private hasSaidSandboxCannotStart = false
+  /** F91: the model heard once that Muse Code's Linux sandbox cannot start here. */
+  private hasToldModelSandboxCannotStart = false
   private releaseSchedules: (() => Promise<void>) | undefined
   private isScheduleHostAvailable = true
   private effort: EffortLevel = DEFAULT_EFFORT
@@ -1124,6 +1138,28 @@ class AcpSession {
     this.send({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } })
   }
 
+  /** Whether the probe measured at host start that Muse Code's Linux sandbox cannot start here. */
+  private sandboxCannotStart(): boolean {
+    return (
+      this.deps.backend.kind === 'museCode' &&
+      isLinuxSandboxBlocked(this.deps.backend.shellSandboxReadiness?.(this.cwd))
+    )
+  }
+
+  /**
+   * F91: the model hears it once, at the tail, so a failing read-only
+   * command never reads as a dead shell. Earlier request bytes are
+   * untouched: this part is appended, never spliced into what came before.
+   * The told-flag flips only after an accepted submission at the call site:
+   * a send that fails or is cancelled before reaching Muse Code must not
+   * silence every later turn.
+   */
+  private sandboxModelNote(): readonly TurnPart[] {
+    return this.hasToldModelSandboxCannotStart || !this.sandboxCannotStart()
+      ? []
+      : [{ type: 'text', text: SANDBOX_CANNOT_START_MODEL_NOTE }]
+  }
+
   private isCurrentReport(preparing: PreparingPrompt): boolean {
     return this.preparing === preparing && !preparing.isCancelled && !this.isDisposed
   }
@@ -1685,6 +1721,40 @@ class AcpSession {
     }
   }
 
+  /**
+   * F91: the editor hears once per session, in words, that Muse Code's
+   * Linux sandbox cannot start on this machine. The host start already said
+   * it on stderr; the posture stands until the person turns it off.
+   *
+   * This is the harness speaking, never the model (that confusion is F82).
+   * Where the client advertises its session-notices capability
+   * (`ClientSessionCapabilities::notices`), it goes as that branch's
+   * separate notice update; otherwise it stays an `agent_message_chunk`
+   * carrying a `_meta` marker (the accountNotice precedent) a client can
+   * tell apart from model speech, which the schema prescribes when notices
+   * are not advertised.
+   */
+  public noteSandboxCannotStart(): void {
+    if (this.hasSaidSandboxCannotStart || !this.sandboxCannotStart()) {
+      return
+    }
+    this.hasSaidSandboxCannotStart = true
+    if (this.clientCapabilities.session?.notices != null) {
+      this.send({
+        sessionUpdate: 'notice',
+        severity: 'warning',
+        title: UI_TEXT.sandboxCannotStartNotice,
+        _meta: { sandboxCannotStartNotice: true },
+      })
+      return
+    }
+    this.send({
+      sessionUpdate: 'agent_message_chunk',
+      _meta: { sandboxCannotStartNotice: true },
+      content: { type: 'text', text: UI_TEXT.sandboxCannotStartNotice },
+    })
+  }
+
   public async loadQuestions(): Promise<void> {
     await this.questionRegistry?.load()
     this.ensureHeld()
@@ -2037,6 +2107,7 @@ class AcpSession {
         this.finishCompaction(outcome.status)
       } else {
         const mediaQueued = [...this.attachments]
+        const sandboxNote = this.sandboxModelNote()
         const starting = this.session.sendTurn(
           [
             ...(pending.answerLease?.parts ?? []),
@@ -2044,6 +2115,7 @@ class AcpSession {
               ...parsed.parts,
               ...mediaQueued.map((attachment) => attachment.part),
             ]),
+            ...sandboxNote,
           ],
           parsed.displayText,
         )
@@ -2064,6 +2136,11 @@ class AcpSession {
         if (submission.userMessageId !== undefined) pending.userMessageId = submission.userMessageId
         const isAccepted =
           submission.disposition === 'started' || submission.disposition === 'queued'
+        // The turn reached Muse Code, so an appended sandbox note rode with
+        // it: only now is it marked as told to the model.
+        if (isAccepted && sandboxNote.length > 0) {
+          this.hasToldModelSandboxCannotStart = true
+        }
         // Decide before noting the turn: a turn that already finished settles
         // the prompt there, which must not release the answers it delivered.
         if (
@@ -2384,6 +2461,9 @@ class AgentState {
       }
     }
     this.sessions.set(sessionId, acp)
+    // F91: a newly adopted session hears once, in words, when Muse Code's
+    // Linux sandbox cannot start on this machine.
+    acp.noteSandboxCannotStart()
     return acp
   }
 

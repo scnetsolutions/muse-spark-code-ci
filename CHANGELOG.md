@@ -7,13 +7,89 @@ happened, not what was planned; superseded entries are kept.
 
 ## [Unreleased]
 
+### Packaging
+
+- One package per platform plus the universal fallback (D123). The release
+  ships six platform packages (win32-x64, win32-arm64, darwin-x64,
+  darwin-arm64, linux-x64, linux-arm64) beside the universal package:
+  each platform package carries only its own platform's native helpers,
+  VS Code serves each person their platform's package, and Alpine and
+  32-bit ARM Linux servers keep installing the universal package the way
+  they always have. Each of the seven is checked against the same
+  unchanged size budget. No behaviour change on any platform.
+
+## [0.19.0] - 2026-10-17
+
+### Highlights
+
+- **Provider refusals read as the provider's refusal.** A wrong key reads as
+  a rejected key and an unknown model as no such model at every recorded
+  provider; a quota or spend-cap refusal is never retried while a bare rate
+  limit still is; a session-budget stop ends the turn with its own sentence
+  instead of "Models & Agents is not available in this build"; and
+  `providers add` and `providers test` name a failed connection's network
+  codes and say whether the request arrived is unknown.
+- **The conversation keeps the model you chose.** After a restart the next
+  message goes out on the model shown, the panel shows the model each
+  request really used, and a message that would run on another model is not
+  sent.
+- **The chat no longer takes the keyboard from a file you just opened.**
+  A panel that finishes loading never pulls the focus in, and a question
+  that arrives while you are elsewhere waits with its badge.
+- **Muse Voice stays silent with its reason past an unrouted proxy.** On
+  VS Code 1.101 to 1.111 with `http.proxy` set, the microphone stays
+  unavailable with the reason instead of recording audio that cannot be
+  sent.
+- **The Linux sandbox says why it cannot start.** While sandboxed on Linux,
+  each host start probes whether the bubblewrap sandbox can create a user
+  namespace here and says so once on every surface, naming the two ways
+  out, without ever switching the sandbox off on its own.
+
 ### Fixed
+
+- Web fetch no longer ships a dead second HTML-to-Markdown entry point:
+  `htmlToMarkdown` had no callers (both backends convert through
+  `convertHtmlJob` on the page worker), so it was removed. No behaviour
+  change.
+- Paid-use consent audit: the four unused consent helpers for scheduled
+  runs and per-account consent stay unwired until their owning milestones
+  land (M115 Lane U's per-schedule consent; M108 lane P's per-account
+  consent). Meanwhile a paid schedule draft from the panel is refused
+  (its caller carries no paid flag or budget) and every reachable paid
+  use still asks the popup; a unit suite now tests that surface refusal
+  through the real surface, separately from the unwired helpers' logic
+  (RVMSM58M69). No behaviour change.
+- On VS Code 1.101 to 1.111 with `http.proxy` set, Muse Voice recorded audio
+  and then failed, because those versions do not route an extension's
+  WebSocket through the proxy. The microphone now stays unavailable with the
+  reason while a proxy is set there, instead of recording audio that cannot
+  be sent.
+- Behind a proxy on VS Code 1.112 or later, a Muse Voice refusal caused by
+  the person's own settings (`http.proxySupport` off, or
+  `http.webSocketAdditionalSupport` off) wrongly blamed the VS Code
+  version. The microphone now names the setting that is off and what to
+  change; the version text stays only for VS Code before 1.112.
+- The production build no longer starts every bundle at once through one
+  esbuild service, which could fail under machine load with an error that
+  named no bundle and then hang. Bundles now run through a bounded pool
+  of 8; a failure names its bundle, in-flight bundles settle, and the
+  process exits with the true error.
 
 - On Windows, two requests that reserve session spend at the same moment
   could end one of them with "The session spend ledger could not be read or
   saved", although nothing was wrong with the ledger. Windows answers a lock
   that is just being released differently from one that is held; the product
   now waits for both the same way, within the same one-second bound.
+
+### Packaging
+
+- The Get Started walkthrough's four screenshots ship as lossless WebP
+  instead of PNG (`open.webp`, `welcome.webp`, `chat.webp`,
+  `sign-in.webp` in `resources/walkthrough/`): pixel-identical, about
+  54 KB smaller on disk. The packaged extension no longer includes
+  `docs/PRIVACY.md`, which no code read; the file stays in the
+  repository and the packaged readme still links the privacy policy by
+  its URL.
 
 ### Release infrastructure
 
@@ -122,6 +198,21 @@ happened, not what was planned; superseded entries are kept.
   input as before, and Focus Input while the composer is focused hands
   the keyboard back to the file you were in (it used to focus the editor
   group, which keeps a chat tab active).
+
+- Linux shell sandbox that cannot start (F91): while sandboxed on Linux,
+  each host start probes whether Muse Code's bubblewrap sandbox can create
+  a user namespace here, and says so once in words on every surface (panel
+  notice, editor-protocol session update, terminal log) naming the two ways
+  out, without ever switching the sandbox off on its own. The model hears it
+  once too. Diagnostics reports the posture and the check.
+
+- Activation budget, after merging main into the F91 change: the
+  Diagnostics command's report text loads with the report dialog's bundle
+  (dist/report.js) on the command's first run instead of at activation.
+  Activation growth over the pre-K baseline goes from 4,529 bytes (over the
+  3,072-byte allowance) to 760 bytes on that merge, and measures 1,018
+  bytes after merging main 81dacaf5a in the RVPR185RED review. No
+  behaviour change.
 
 - Invariants lane: `test/unit/invariants.test.ts` re-guards the SoL-Pi
   request-shape and savings invariants through real modules with real inputs

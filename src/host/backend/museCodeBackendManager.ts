@@ -36,7 +36,10 @@ import {
   withLoopbackBypass,
 } from '../../core/backends/musecode/launch'
 import {
+  isLinuxSandboxBlocked,
   isSandboxNetworkApplied,
+  type LinuxSandboxReadiness,
+  probeLinuxSandboxShell,
   resolveShellSandbox,
   serveArguments,
   type ShellSandboxPosture,
@@ -171,6 +174,8 @@ function listDirectoryOrEmpty(log: Logger, directory: string): readonly string[]
 
 export class MuseCodeBackendManager {
   private hostPromise: Promise<MuseCodeHost> | undefined
+  /** The Linux capability probe of the last started host (F91); one probe per start. */
+  private linuxSandboxReadiness: LinuxSandboxReadiness | undefined
   /** Bumped by every spawn and every dispose: an attempt only clears its own slot. */
   private generation = 0
   private resourceStop = new AbortController()
@@ -263,6 +268,24 @@ export class MuseCodeBackendManager {
     this.deps.log.info(
       `Shell sandbox ${posture.isSandboxed ? 'on' : 'off'} (${posture.reason}) for this host`,
     )
+    // F91: while sandboxed on Linux, learn whether Muse Code's sandbox can
+    // start on this machine at all, and say so once in words when it cannot,
+    // instead of letting every unasked command fail with bwrap's raw line.
+    // Turning the sandbox off stays the person's choice: the posture stands.
+    // A fresh probe per start: the person may have allowed user namespaces
+    // since the last one, then restarted the host.
+    this.linuxSandboxReadiness = undefined
+    const readiness = await this.readShellSandboxReadiness(posture)
+    if (isLinuxSandboxBlocked(readiness)) {
+      this.deps.log.warn(UI_TEXT.sandboxCannotStartNotice)
+    } else if (readiness !== undefined && !readiness.canStart) {
+      // The system-bwrap measurement failed without proving the sandbox
+      // cannot start (Muse Code may use its embedded fallback), so this is
+      // a log line in fixed words, never the cannot-start notice.
+      this.deps.log.info(
+        'Shell sandbox check: the system bwrap probe did not pass here; Diagnostics has the detail',
+      )
+    }
     if (!posture.isSandboxed) {
       // Meta's permissions page: --disable-sandbox "also removes workspace
       // confinement from the file tools" (musecode-write-asks, 2026-10-04).
@@ -486,6 +509,39 @@ export class MuseCodeBackendManager {
       workspaceRoot: this.deps.workspaceRoot,
       userProfileDir: this.deps.userProfileDir,
     })
+  }
+
+  /**
+   * What the Linux capability probe measured (F91): whether Muse Code's
+   * sandbox can start on this machine. Undefined where the probe does not
+   * apply (off Linux, or the sandbox off) or while no host has started. A
+   * stale cache never answers while the current posture is off: turning
+   * `museSpark.shellSandbox` off after a probe ran reads as not checked.
+   */
+  public shellSandboxReadiness(): LinuxSandboxReadiness | undefined {
+    return process.platform !== 'linux' || !this.shellSandboxPosture().isSandboxed
+      ? undefined
+      : this.linuxSandboxReadiness
+  }
+
+  /**
+   * The cached probe, or one fresh probe when it applies and none ran yet
+   * (the Diagnostics report reads this before any host has started).
+   * Applicability is checked before the cache, so a posture change is
+   * honoured even when only an earlier run populated it.
+   */
+  public async readShellSandboxReadiness(
+    posture?: ShellSandboxPosture,
+  ): Promise<LinuxSandboxReadiness | undefined> {
+    const active = posture ?? this.shellSandboxPosture()
+    if (process.platform !== 'linux' || !active.isSandboxed) {
+      return undefined
+    }
+    if (this.linuxSandboxReadiness !== undefined) {
+      return this.linuxSandboxReadiness
+    }
+    this.linuxSandboxReadiness = await probeLinuxSandboxShell(this.deps.workspaceRoot)
+    return this.linuxSandboxReadiness
   }
 
   /**

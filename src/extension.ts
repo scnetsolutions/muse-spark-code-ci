@@ -12,6 +12,8 @@ import {
   BACKEND_SETTING,
   BYPASS_SETTING,
   CLI_PROCESS_SETTINGS,
+  HTTP_POSTURE_SETTINGS,
+  HTTP_PROXY_SETTING,
   HTTP_SETTINGS_SECTION,
   POSIX_TERMINAL_SHELL,
   TERMINAL_ENV_KEYS,
@@ -149,7 +151,7 @@ import {
 import { memoryDataRoot } from './core/memory/memoryLocation'
 import { isSamePath } from './core/paths'
 import { terminalArgument } from './core/shellQuote'
-import { renderSupportReport } from './core/support/report'
+import type * as ReportBundle from './host/support/reportEntry'
 import { isSandboxNetworkApplied } from './core/backends/musecode/sandbox'
 import { DIAGNOSTIC_SEVERITIES, type DiagnosticEntry, diagnosticsTool } from './core/diagnostics'
 import type { EditorContext } from './core/editorContext'
@@ -317,6 +319,7 @@ import {
   managedConfiguration,
   readNetworkFacts,
   readProxySettings,
+  readVoiceNetworkPosture,
 } from './host/networkPosture'
 import { OutputDocumentStore } from './host/outputDocuments'
 import { loggedPopups } from './host/popups'
@@ -1254,21 +1257,36 @@ async function activateWindow(
   })
   // Muse Voice (M35): the paid engine's recorder, used only while it is
   // on, its price accepted, and the window runs on the Model API key.
-  const museVoiceSetup = createMuseVoiceSetup(
-    {
-      platform: process.platform,
-      systemRoot: process.env['SystemRoot'],
-      helperDir: path.join(context.extensionPath, DICTATION_HELPER_DIR),
-    },
-    {
-      apiKey: () => credentials.getApiKey(),
-      onSeconds: (seconds) => {
-        paid.usage.add('voice', seconds)
+  // M56 (PLAN.md D43): before VS Code 1.112 the socket bypasses a
+  // configured proxy, so the microphone says so instead of failing after
+  // the press. `http.proxy` can change while the window is open, so the
+  // setup is rebuilt when it changes (see the configuration listener
+  // below); a snapshot from activation would keep offering a microphone
+  // that cannot send, or keep refusing after the proxy is gone.
+  const helperProbe = {
+    platform: process.platform,
+    systemRoot: process.env['SystemRoot'],
+    helperDir: path.join(context.extensionPath, DICTATION_HELPER_DIR),
+  }
+  let museVoiceSetup: ReturnType<typeof createMuseVoiceSetup>
+  const refreshMuseVoiceNetwork = (): void => {
+    museVoiceSetup = createMuseVoiceSetup(
+      helperProbe,
+      {
+        apiKey: () => credentials.getApiKey(),
+        onSeconds: (seconds) => {
+          paid.usage.add('voice', seconds)
+        },
+        log,
+        voice,
       },
-      log,
-      voice,
-    },
-  )
+      readVoiceNetworkPosture(vscode.workspace.getConfiguration(HTTP_SETTINGS_SECTION)),
+    )
+    for (const controller of controllers.values()) {
+      controller.refreshDictation()
+    }
+  }
+  refreshMuseVoiceNetwork()
   const broadcastPaidState = () => {
     registry.broadcast({ type: 'paidState', state: paid.state() })
     for (const controller of controllers.values()) {
@@ -1517,15 +1535,7 @@ async function activateWindow(
     context.subscriptions.push(disposable)
   }
   // Voice dictation (M9): the OS recogniser behind the composer's microphone.
-  const dictation = createDictationSetup(
-    {
-      platform: process.platform,
-      systemRoot: process.env['SystemRoot'],
-      helperDir: path.join(context.extensionPath, DICTATION_HELPER_DIR),
-    },
-    log,
-    voice,
-  )
+  const dictation = createDictationSetup(helperProbe, log, voice)
   const backend = new MuseCodeBackendManager({
     shellJobAssembly: () => windowsJobAssembly?.() ?? Promise.resolve(undefined),
     beforeWorkspaceHostStart: async () => {
@@ -3511,6 +3521,7 @@ async function activateWindow(
           },
           platform: process.platform,
           shellSandbox: () => backend.shellSandboxPosture(),
+          shellSandboxReadiness: () => backend.shellSandboxReadiness(),
           shouldWarnSandboxOff,
           editorContext: () => editorContext.active,
           isAutosaveEnabled: () => currentSettings().autosave,
@@ -4309,14 +4320,26 @@ async function activateWindow(
       { webviewOptions: { retainContextWhenHidden: true } },
     ),
     vscode.workspace.onDidChangeConfiguration((event) => {
+      // Muse Voice's proxy refusal follows the live `http` settings while
+      // the window is open (M56, PLAN.md D43): the proxy itself and the
+      // two support flags behind the socket decision.
+      if (
+        event.affectsConfiguration(`${HTTP_SETTINGS_SECTION}.${HTTP_PROXY_SETTING}`) ||
+        event.affectsConfiguration(
+          `${HTTP_SETTINGS_SECTION}.${HTTP_POSTURE_SETTINGS.proxySupport}`,
+        ) ||
+        event.affectsConfiguration(
+          `${HTTP_SETTINGS_SECTION}.${HTTP_POSTURE_SETTINGS.webSocketAdditionalSupport}`,
+        )
+      ) {
+        refreshMuseVoiceNetwork()
+      }
       if (event.affectsConfiguration(`${SETTINGS_SECTION}.${PROMPT_SYNC_SETTING}`))
         void syncPrompts()
       if (event.affectsConfiguration(SETTINGS_SECTION)) {
         void withHookRunner((runner) => runner.noteSettingsChange(), false).catch(
           logRejection(log, 'ConfigChange hook'),
         )
-      }
-      if (event.affectsConfiguration(SETTINGS_SECTION)) {
         registry.broadcast({ type: 'settingsChanged', settings: hostContext.getSettings() })
         for (const controller of controllers.values()) {
           controller.refreshDictation()
@@ -4612,8 +4635,11 @@ async function activateWindow(
               backend.workspaceActionGuard(nativeStarts.signal),
             )
           : undefined
+      // The report's text loads with the report dialog's bundle
+      // (dist/report.js, PLAN.md D6) on the first run, not at activation.
+      const report: typeof ReportBundle = await import('./host/support/reportEntry')
       log.info(
-        renderSupportReport({
+        report.renderSupportReport({
           extensionVersion: version,
           vscodeVersion: vscode.version,
           nodeVersion: process.versions.node,
@@ -4625,6 +4651,11 @@ async function activateWindow(
           backendSetting: settings.backend,
           shellSandboxSetting: settings.shellSandbox,
           shellSandboxPosture: `${posture.isSandboxed ? 'sandboxed' : 'disabled'} (${posture.reason})`,
+          // F91: the health line for the sandbox (posture and this check);
+          // a fresh probe when no host has started yet.
+          shellSandboxReadiness: report.sandboxReadinessLine(
+            await backend.readShellSandboxReadiness(),
+          ),
           isShellSandboxed: posture.isSandboxed,
           sandboxNetworkSetting: settings.sandboxNetwork,
           isSandboxNetworkApplied: isSandboxNetworkApplied(settings.sandboxNetwork, posture),

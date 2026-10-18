@@ -1134,10 +1134,29 @@ behavior. Activation, recorder, shared parsers and ACP entry remain ordinary
 CommonJS; compressed regional key lists offset the eager reader's bytes.
 Both packages check exact staged translations against source JSON. Manifest
 tables, licences/notices, helpers and browser chunks remain ordinary files.
-Lossless PNG filtering preserves every walkthrough pixel. All existing caps
+Lossless WebP preserves every walkthrough pixel. All existing caps
 stay unchanged; package/member and drill receipts are in
 `docs/certification/vsix-diet-2.md`. This is shared Node packaging for VS Code
 hosts and ACP/headless editors; browser fallback and editor features are unchanged.
+
+**VSIXROOM (2026-10-17).** Banks VSIX headroom with the 3700 KiB cap
+unchanged: the Get Started walkthrough's four screenshots ship as lossless
+WebP instead of PNG (pixel-identical; decoded-RGB SHA-256 equal in two
+independent decoders; about 54 KB smaller on disk), and `docs/PRIVACY.md`
+leaves the package (no code reads it; the file stays in the repository and
+the packaged readme keeps the policy URL). Measured saving about 70 KB,
+i.e. about 75 KB of headroom against main's universal VSIX. The lane's
+original 150 KiB aspiration (universal at or below 3,635,200 bytes) is
+revised, not met: every remaining byte is load-bearing — the archives are
+at their measured optima, knip is clean with zero unreached lazy bundles,
+and the 213 unread `UI_TEXT` keys belong to in-flight strings-first lanes.
+Even accepting every rejected cut (EAGER stubbing about 14 KB, uiText-region
+archiving about 15 KB, parse5 replacement about 30 KB) reaches only about
+129 KB within the standing rules; the 150 KiB mark is reachable only through
+lossy walkthrough images or locale/feature cuts, which this lane does not
+take. The remaining about 78 KB stays deferred with its measurements in
+`docs/certification/vsix-room.md`; a later diet lane re-opens it. No cap
+moves.
 
 | Artifact                                                                            | Budget (minified, uncompressed) |
 | ----------------------------------------------------------------------------------- | ------------------------------- |
@@ -2908,7 +2927,9 @@ are left to the system store, so the extension never sets `SSL_CERT_FILE`.
 offered. `prompt_cache_retention` is `in_memory` by default, with `24h` only
 when the user chooses it. As amended on 2026-09-27, VS Code patches
 `WebSocket` only from 1.112.0, so on 1.101 to 1.111 Muse Voice's socket goes
-to Meta without VS Code's proxy and certificate handling. Full record:
+to Meta without VS Code's proxy and certificate handling; while `http.proxy`
+is set there the microphone stays unavailable with the reason instead of
+recording audio that cannot be sent (MSM56, 2026-10-17). Full record:
 [docs/plan-archive/decisions.md](docs/plan-archive/decisions.md).
 
 ### D45 — Subagents on both backends (M48, 2026-09-25)
@@ -14507,6 +14528,85 @@ CONTRIBUTING.md, "The capacity repository (D122)"; proofs:
 `docs/certification/ciflow.md` (D122). Full record:
 [docs/plan-archive/decisions.md](docs/plan-archive/decisions.md).
 
+### D140 — Claimed-shipped milestones: an `@unwired` tag is resolved by the user-visible promise (MSM58M69, 2026-10-17)
+
+A verification scan found `@unwired` tags carrying shipped milestone ids
+(M58, M69). The tag alone does not mean the promise is broken: TESTCUT
+tagged every unused export with its nearest shipped id. Each item is
+resolved against the plan's user-visible promise, not against the tag:
+
+- **Promise already kept through another path:** the dead export is
+  removed, not wired. M69's `htmlToMarkdown` had no callers (a prior
+  dead-code lane verified zero references; the revert restored it only
+  incidentally): both backends convert through `convertHtmlJob` on the
+  page worker. Wiring a second conversion path would duplicate behaviour
+  to satisfy the gate.
+- **Designed for a milestone that is still building:** it stays unwired
+  and no other lane wires it. `askSchedulePaidConsent` and
+  `createSchedulePaidScope` are M115 Lane U's region
+  (`src/core/paid/paidConsent.ts`, the schedule scope); `paidAccountQuestion`
+  and `AccountPaidUseConsent` are M108 lane P's per-account consent. The
+  tag keeps knip honest until their lanes land.
+- **Fail-closed meanwhile, at the sites a person can reach:** a paid V2
+  draft is refused unless the trusted caller carries `scheduledPrompts`
+  and a budget at least its cap (`src/runtime/schedules/surface.ts`,
+  again in `control.ts`); the panel's caller carries neither
+  (`runtime.ts`, `scheduledPrompts: false`), and the editor's default
+  draft cap is 0 (`schedulesBridge.ts`). A CLI/ACP caller with the flag
+  and budget can create a paid draft today, but it cannot spend: no
+  production code constructs `createSchedulePaidScope` or calls
+  `reserveSchedule`, `UnattendedRun` is never constructed, and the one
+  `ScheduleDelivery` composition (`engine.ts`) has no session target
+  (`find` returns nothing, `open`/`fresh`/`runs` throw
+  target-unavailable). Lane U therefore wires creation consent, the run
+  scope and the reservation **before** any delivery target; nothing here
+  claims a firing V2 run checks consent today (corrected by RVMSM58M69,
+  which also added the surface-refusal tests to
+  `test/unit/schedulePaidConsent.test.ts`; that file's helper tests prove
+  only the unwired helpers' own logic).
+- **Refusals stay default-off:** web fetch keeps refusing private/local
+  addresses and credentialed URLs. A per-role permission for the person's
+  own network is NOT FIXED and not built (owner's choice of 2026-10-16
+  allows one in the model role settings, which have no web-fetch entry
+  today); when it is built, the refuse sites are `checkPageUrl`
+  (`src/core/web/pageUrl.ts`), `isPublicAddress`
+  (`src/core/web/publicAddress.ts`) and the pin in
+  `src/core/web/webFetch.ts`, and every caller (VS Code, ACP/headless,
+  both backends) must pass the role's answer through. MSM58M69 shipped
+  no behaviour change for it.
+
+### D123 — One .vsix per platform plus the universal fallback, each within the unchanged budget (lane VSIXPLATFORM, 2026-10-18; fallback and shared publish poll by lane PR246FIX)
+
+The universal .vsix carries every platform's native helpers and is near
+its 3,788,800-byte budget (D6) with 131 KB of open pull requests and
+4.7 MB of vault keyring binaries still to come. The budget is never
+raised and no feature is cut, so the release ships one package per
+supported target instead: win32-x64, win32-arm64, darwin-x64,
+darwin-arm64, linux-x64 and linux-arm64 (`vsce package --target`, locked
+vsce 4.0.0; engines.vscode `^1.99.0` clears the ≥1.61 platform-extension
+floor). Each target carries only its own platform's native pieces plus
+the platform-neutral bundles; `native/runner/*` ships everywhere because
+the SSH runner copies the helper to the remote side. Windows targets
+carry the same arch-independent sources (the .ps1 run directly, the .cs
+compiled on the person's machine), so win32-arm64 is supported today.
+The darwin binaries ship universal (both slices) in both darwin
+targets: splitting per-arch saves little against the megabytes the other
+platforms' pieces free, and keeps build.sh's single lipo output unchanged.
+Beside the six, the release ships the untargeted universal package (no
+`--target`): VS Code serves it as the fallback on every platform without
+its own package, so Alpine (`alpine-x64`, `alpine-arm64`) and `linux-armhf`
+servers — `extensionKind: ["workspace"]`, so a Dev Container or Remote SSH
+window installs the extension on the server — keep installing exactly what
+they ran before. (There is no `web` target to serve: the extension has no
+`browser` entry, so VS Code never installs it on web.) Every one of the
+seven packages is checked against the same D6 budget; CI builds and checks
+all seven, and the release publishes all seven to the Marketplace and Open
+VSX: every artifact is published before any visibility poll runs, all share
+one 30-minute poll deadline inside 60-minute jobs, and unfinished targets
+are re-checked in the same job, so a cancelled job never leaves only some
+targets published.
+Evidence: `docs/certification/vsix-platform.md`.
+
 ## 3. Open questions (need the owner)
 
 **Q-REFUSAL-FALLBACK (lane PROVERRR2, 2026-10-13).** GAPANTH-G11's scan row
@@ -17858,6 +17958,13 @@ owner commands; accepted control shapes remain uncaptured.
 ### M56 — Enterprise network and posture (D43)
 
 **Status 2026-09-27: built.**
+
+- **MSM56 finish (2026-10-17).** While `http.proxy` is set on an editor
+  that does not route the extension host's `WebSocket` (VS Code 1.101 to
+  1.111, or an editor built on it that routes neither global), the Muse
+  Voice microphone stays unavailable with the reason instead of recording
+  audio that cannot be sent (`src/core/voice/voiceNetwork.ts`,
+  `museVoiceNoProxy`, `docs/certification/m56.md`).
 
 - **Archived.** The full section is in [docs/plan-archive/milestones.md](docs/plan-archive/milestones.md).
 
@@ -30230,8 +30337,16 @@ merges before its contracts freeze.
 
 ### M112 — Questions that never block (D92)
 
-**Status 2026-10-06: built.** Fake-only integration complete; live checks and full
-quality remain with the lead. Small: about 48 lane-hours in lane 0 and
+**Status 2026-10-17 (MSM112): building.** No completion claim: the
+connection audit traces every M112 behaviour to its handler in source
+(panel, ACP/terminal, headless, help, settings); the kept suites pass; l10n,
+reference, host-api and plan gates pass; the build passes with the question
+wiring in `dist`. NOT yet proven: the real extension-host integration test
+was not run, and the live model checks, installed-editor runs and
+native-host/TUI/Desktop rows remain with the lead and their owning lanes.
+The milestone stays provisional until those recorded checks exist.
+Record: `docs/certification/msm112.md`.
+Small: about 48 lane-hours in lane 0 and
 three lanes, for a 0.14.x patch (0.14.3, or folded into 0.14.2 when both are
 ready together). Lanes Q, U and A start together once lane 0's contracts
 freeze, and none waits on an unmerged milestone. The native-host, TUI and
@@ -38919,6 +39034,33 @@ Unresolved items remain delivery/security gaps, not accepted legal conclusions:
   Platform/live release receipts remain separate requirements.
 
 ## 10. Definition of done and release records
+
+**0.19.0 preparation (2026-10-17).** `release/0.19.0` cut from `main-now` at
+`81dacaf5a7`, merging in order PR #185 (`fix/sandbox-say`: the Linux sandbox
+cannot-start notice), PR #189 (`ms/msm112`: the production build runs through
+a bounded pool of 8), PR #190 (`ms/msm56`: Muse Voice stays unavailable with
+its reason past an unrouted proxy), PR #199 (`ms/msm58m69`: the consent audit
+and the dead `htmlToMarkdown` removal), and PR #230 (`fix/vsix-room`: the Get Started
+walkthrough's four screenshots ship as lossless WebP instead of PNG and
+`docs/PRIVACY.md` leaves the package, banking about 70 KB of .vsix headroom
+against the unchanged budget). PR #203 (`ms/msm82`: turn and background
+notices) merged and then left the release again: `659d179ff1` reverts its
+merge (`7374e26283`), so the release holds five pull requests (#185, #189,
+#190, #199, #230) and #203 is held for the next release — its unfocused-turn
+notice and Show Conversation action need a model turn in a real editor window
+and could not be proven in real use tonight, and nothing ships unproven.
+#203 added no CHANGELOG entry of its own (its behaviour was already recorded
+under `[0.12.0]`'s Awareness and budgets), so `[0.19.0]` stands as promoted;
+its entries return to `[Unreleased]` on main when #203 merges there.
+`package.json` and `package-lock.json` at
+0.19.0; CHANGELOG's `[Unreleased]` promoted to `[0.19.0] - 2026-10-17` with
+a five-bullet Highlights list, plus PR #230's Packaging entry under
+`[0.19.0]` from its merge; the roadmap regenerated. Gates on the final
+tree: format, eslint zero warnings, typecheck, check:plan, check:roadmap,
+check:l10n, check:reference, knip, build with bundle budgets, and the unit
+suites of the files the revert touched, all green; the full .vsix is packed by hosted
+CI. The `0.19.0 released (…)` line is written by the lead after the tag's
+release run.
 
 **0.18.2 released (2026-10-12, tag `v0.18.2` on main's release merge `898a26c5e`, PR #153, release run 38329786779).**
 Pull request 153 (`release/0.18.2`, head `d243e0771`, cut from

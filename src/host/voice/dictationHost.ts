@@ -15,6 +15,8 @@ import {
   locateCaptureHelper,
   locateDictationHelper,
 } from '../../core/voice/helperLocation'
+import { voiceNetworkRefusal, type VoiceNetworkRefusal } from '../../core/voice/voiceNetwork'
+import { hostRouting, type VoiceNetworkPosture } from '../networkPosture'
 import { EXTENSION_QUALIFIED_ID, UI_TEXT } from '../../shared/constants'
 import { uiLocale } from '../../shared/l10n/text'
 import { deferredDriver, type VoiceBundle } from './voiceBundle'
@@ -71,26 +73,66 @@ export interface MuseVoiceSetupDeps {
  * Muse Voice (M35, PLAN.md D30): the paid engine's recorder for this
  * platform and the stream to Meta, or why it cannot run here. Whether it is
  * the microphone's engine (the setting, the accepted price, the Model API
- * backend) is the caller's to decide.
+ * backend) is the caller's to decide. `network` is the live `http`
+ * posture (M56, PLAN.md D43): whether `http.proxy` names a proxy
+ * (validated, never raw) and the support settings behind the socket, read
+ * fresh on every rebuild so a settings change takes effect at once.
  */
+
+/**
+ * The microphone's sentence for a network refusal: the old-version text
+ * only for a socket no editor version routes, otherwise the setting left
+ * off and what to change. Called when the setup runs (never at module
+ * load) so the installed language is the one shown.
+ */
+function reasonForRefusal(refusal: VoiceNetworkRefusal): string {
+  switch (refusal) {
+    case 'proxy': {
+      return UI_TEXT.museVoiceNoProxy
+    }
+    case 'proxySupportOff': {
+      return UI_TEXT.museVoiceProxySupportOff
+    }
+    case 'proxyWebSocketOff': {
+      return UI_TEXT.museVoiceProxyWebSocketOff
+    }
+    case 'noSocket': {
+      return UI_TEXT.museVoiceNoWebSocket
+    }
+  }
+}
+
 export function createMuseVoiceSetup(
   probe: Omit<
     CaptureProbe,
     'fileExists' | 'programFiles' | 'remoteName' | 'appName' | 'pathVariable'
   >,
   deps: MuseVoiceSetupDeps,
+  network: VoiceNetworkPosture,
 ): DictationSetup {
-  if (typeof globalThis.WebSocket !== 'function') {
-    return { isAvailable: false, reason: UI_TEXT.museVoiceNoWebSocket }
-  }
-  const location = locateCaptureHelper({
-    ...probe,
-    fileExists: existsSync,
-    programFiles: process.env['ProgramFiles'],
-    remoteName: remoteHostName(),
-    appName: env.appName,
-    pathVariable: process.env['PATH'],
-  })
+  const refusal = voiceNetworkRefusal(
+    hostRouting(globalThis, 'webSocket'),
+    network.isProxySet,
+    network.support,
+  )
+  const location =
+    refusal === undefined
+      ? locateCaptureHelper({
+          ...probe,
+          fileExists: existsSync,
+          programFiles: process.env['ProgramFiles'],
+          remoteName: remoteHostName(),
+          appName: env.appName,
+          pathVariable: process.env['PATH'],
+        })
+      : {
+          isAvailable: false as const,
+          // The old-version text only for a socket no editor version
+          // routes; otherwise the setting left off and what to change.
+          // Read here (not at module load) so the installed language is
+          // the one shown.
+          reason: reasonForRefusal(refusal),
+        }
   if (!location.isAvailable) {
     deps.log.info(`Muse Voice unavailable: ${location.reason}`)
     return location
