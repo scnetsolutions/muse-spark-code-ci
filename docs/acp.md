@@ -361,6 +361,20 @@ Creator's ACP Client, sublime-acp, Devin Desktop's custom agents).
   M108's `/accounts <list|current|thresholds [id]>` on the Model API
   backend, answered locally with no model turn; `/accounts use <id>` is
   refused and names the account the session keeps.
+  M115's `/schedule` (list, add, remove, run-now, pause, resume, fire and
+  timeline; `run-due` and background maintenance are refused here), offered
+  only with `--scheduled-prompts`.
+  M117's `/estimate <goal> [--by <date>] [--fleet current|minimum|optimum]`
+  when the estimator binding is present; it runs the same engine as the
+  panel with no model call. `/estimate --check-plan` checks every row in the
+  workspace plan, independently of a forecast's dependency closure. Use the
+  flag alone, with no goal or other flags. It requires plan-format-v1 and a
+  lane table, returns all problems (including line numbers for malformed rows),
+  and returns an empty response only for a clean plan. Missing or unsupported
+  plans are failures. The standalone `muse-spark-code-acp estimate --check-plan`
+  uses exit codes 0 for clean, 1 for problems/unavailable, and 2 for usage.
+  Plan and engine refusals, including self dependencies and cycles, use the same
+  localized diagnostic as the panel and CLI. Raw external errors hide private details.
 - **Permission prompts**: the backend's own choices (allow once, allow for
   the session, reject). A prompt the editor cancels, or answers with a
   choice it was not offered, is rejected; nothing runs by default.
@@ -872,7 +886,10 @@ limits apply equally to every ACP editor and to headless execution.
 
 `muse-spark-code-acp report project` collects locally through the same engine
 as the editor. `report quality`, `report milestone M113`, `report release
-latest` and `report changes` select other local reports. `report history`
+latest`, `report changes`, `report keybindings`, `report usage`,
+`report session`, `report accounts`, `report security`, `report estimate M113`,
+`report playbook` and `report schedules` select other local reports.
+`report history`
 lists verified, workspace-scoped saved entries. Bare `report`, and `report
 problem`, retain M93's problem report.
 
