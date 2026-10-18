@@ -24005,6 +24005,26 @@ release acceptance are still pending.
 
 ### M95b — Subscription sign-in: ChatGPT plan, Copilot models, plan keys (D74)
 
+**PROVPLAN provider research fixes (2026-10-17).** Follow OpenAI's Sign in
+with ChatGPT pages for the plan route (`docs/research/providers/chatgpt-codex.md`,
+PR #202): keep the account's registration (issued client, hashed account, no
+token) across sign-out and reuse it, with "Use a Different ChatGPT Account" as
+the one way to register anew; ride the documented 503 answers on the turn's
+bounded retry and route a pre-stream usage limit to the plan-limit answer;
+send and enforce no output or size cap of ours. Usage windows, reset times,
+`earliest_refresh_at`, input modalities and Ultrafast stay open until a capture
+shows them (`docs/certification/plan-catalogue.md`, PROVPLAN).
+
+**RVHOSTID review fixes (2026-10-14, Windows).** Reuse the canonical Responses
+codec and callback adapters. Reject invalid or repeated stream output indices
+before terminal adoption, preserve typed authorize refusals through both
+callbacks and local host-id validation failures through the runtime boundary.
+Fast tier reset remains an open review finding. Verify with real-module boundary
+tests and recorded captures; no provider
+requests or access to the owner's live grant. Credential-part reclamation and
+POSIX stale-socket recovery require a coordinated lifecycle redesign: keep their
+proven races open in `.lane/RVHOSTID.report.md`, not a partial safety claim.
+
 **Status 2026-10-10 (corrects 2026-10-05: acceptance 1–10 still open, so not built; first parts shipped in the 0.15.0 preview, live plan inference, installed-editor receipts and full quality remain): building.**
 
 - **Goal.** A user with a ChatGPT Plus or Pro plan, or a Copilot plan, runs

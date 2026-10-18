@@ -9,6 +9,19 @@ happened, not what was planned; superseded entries are kept.
 
 ### Fixed
 
+- Every ChatGPT plan-route failure now names its cause. A plan refusal with
+  no error words from OpenAI said "temporarily unavailable"; it now says
+  "The ChatGPT plan request failed: HTTP {status}". A session whose
+  providers file cannot be read said "That did not work"; it now says which
+  fault (`unparseable`, `invalid`). A garbage host-identifier file in the
+  editor said OpenAI's token answer was malformed; it now says the stored
+  host identifier could not be read. The packed agent also crashed with a
+  `TypeError` instead of the sentence where the account check failed: the
+  account check's failure-text helper was never exported from the
+  subscriptions bundle, and now is. An editor starting a session with an
+  unreadable providers file now gets that sentence as the error's message
+  instead of a bare "Internal error", and `providers list`
+  and `exec --provider` print the reason instead of "Test failed: {detail}".
 - On Windows, two requests that reserve session spend at the same moment
   could end one of them with "The session spend ledger could not be read or
   saved", although nothing was wrong with the ledger. Windows answers a lock
@@ -45,6 +58,110 @@ happened, not what was planned; superseded entries are kept.
 
 ### Pending
 
+- ChatGPT sign-in no longer registers a new app with OpenAI every time.
+  OpenAI asks apps to save the client it issues at the first sign-in and
+  reuse it for later sign-ins to the same account; the app re-registered on
+  every sign-in, after a sign-out and after an expired sign-in alike. It now
+  keeps that registration (the issued client and a hash of the account, no
+  token) beside the sign-in, keeps it when you remove ChatGPT, and signs the
+  same account in again with it. A sign-in that comes back for another account
+  is refused before anything is replaced. To register a different ChatGPT
+  account, choose **Use a Different ChatGPT Account** in the Models panel or
+  the editor's sign-in methods, or run `providers add chatgpt --new-account`.
+  Every refresh answer OpenAI documents as an unusable sign-in now asks you to
+  sign in again instead of "temporarily unavailable", and a registration
+  OpenAI no longer accepts says so and names the way out.
+
+- ChatGPT plan refusals are handled as OpenAI documents them. A usage limit
+  answered before the reply starts (HTTP 429) now opens the same plan-limit
+  card, with Manage Usage, as one that arrives mid-reply; it was a generic
+  failure. OpenAI's "usage could not be checked" and "user information
+  temporarily unavailable" answers and its direct-route 503, before or during
+  a reply, are retried with the turn's bounded backoff and keep your sign-in;
+  they used to fail at once. "Plan use is not available for this account,
+  workspace or policy" has its own sentence and is never retried, and a
+  refusal OpenAI words as `detail` instead of an error object now shows its
+  words instead of "temporarily unavailable". The rate and retry headers the
+  plan route sends are kept in the usage journal as reported, as for every
+  other provider.
+
+- ChatGPT plan replies are no longer cut short by this app. The app stopped a
+  plan reply once its own count passed 32,768 output tokens (Meta's figure,
+  counted as bytes) or the stream passed 16 MiB, although OpenAI's plan route
+  takes no output cap and tells apps to omit `max_output_tokens`. A plan
+  reply now ends where the model itself ends it.
+
+- Review-only tests that fabricated ChatGPT/provider/editor/store behavior were removed or replaced with real native-store and pure-module checks; historical harness passes are no longer claimed as product proof.
+
+- Credential reads now reclaim a crashed writer's orphaned secret parts and generation record, even when the primary value is absent; recovery no longer waits for a later write or delete.
+
+- Credential-store verification now uses a separate random test service for every run. Its cleanup no longer enumerates the production service, whose native API returns passwords as well as account names.
+
+- ChatGPT sign-in and plan turns: several local problems were reported as "ChatGPT is temporarily unavailable. Try again.", which retrying cannot fix. Each now says what it is: another window or process holding the sign-in lock past the wait, a sign-in you cancelled, a browser that could not open the sign-in address, a providers file that cannot be read or saved (with the reason), an editor credential store that refuses, a failed local file step (with the operating system's code), and a plan request this app could not prepare. A failure that really is the network or OpenAI keeps the retry sentence. The Models panel now shows the same validated ChatGPT failure cause for a failed connect; unrelated exceptions keep the general sentence without leaking their text.
+
+- Credential and runtime grant locks no longer invent an ownership-wait deadline. They wait for the owner unless the caller explicitly supplies cancellation or a deadline.
+
+- POSIX credential locks no longer depend on a process's temporary-directory setting: their short `/tmp` root keeps one identity across processes and fits native socket paths. Existing shared/symlinked roots refuse; cleanup of an unlistening entry requires a proven-dead PID, not an age guess that could delete a paused process's entry.
+
+- Sign-in lock on macOS and Linux: two processes recovering a crashed process's leftover socket file at the same moment could both end up holding the lock, so two sign-ins or refreshes could run at once and burn each other's refresh token. A process now binds a socket of its own under a random name and holds the lock only if no other entry has a live listener; it never removes a name another process may have just bound. The lock's folder and file names are shorter so their socket path fits macOS's 103-character limit (the credential store's per-account lock from the entry below was 107 there).
+
+- Credential store, long values (ChatGPT grant): two processes writing the same account at once could destroy the current credential (one wrote a header whose parts the other had just removed), and a failed or killed write left secret parts that no later delete removed. Every write, delete and read of a long value now takes one cross-process owner per account (the same named lock the sign-in uses, on a name of its own), a small record names every generation of parts before any is written, and the next owner of an account removes whatever a crashed owner left. A reader never sees a generation that was deleted.
+
+- ACP plan-model switches now distinguish a catalogue default from an effort you explicitly chose: an unchosen switch starts on the destination's default, while a supported explicit choice survives switches and in-process resume.
+
+- ChatGPT plan, effort: the panel started a plan model on `high` and kept it when you switched models, although the plan's own catalogue names a lower default (`low` for `gpt-6.1-sol`). A conversation or model switch you have not chosen a level for now starts on the model's catalogue default; a level you picked with the slider is kept.
+
+- `exec --effort` checked the level against the model the session started on, not the one `--model` selected: `--model muse-spark-1.2 --effort max` was not refused as a usage error (1.2 has no `max`) and the run ended as an incomplete turn. The level, and `--fast`, are now checked against the selected model's own options.
+
+- ChatGPT plan, Fast: the Fast switch could stay on in the request while the panel showed it off. Turning Fast on for one model, switching to a model without it and back sent the priority tier (more of your plan allowance) with the switch showing off, and a conversation resumed or opened in a panel could re-apply a Fast flag left from an earlier one. The session now drops Fast the moment its model changes, the panel always tells the session "off" when it shows off, and every conversation a panel takes starts with Fast off.
+
+- ChatGPT plan streams now refuse missing, invalid or repeated output indices and repeated call identities instead of retaining ambiguous tool calls for execution and replay.
+
+- ChatGPT sign-in callbacks preserve OpenAI's validated refusal code instead of replacing it with an invalid-callback failure. A corrupt local host identifier is no longer reported as a temporary provider failure.
+
+- ChatGPT plan models could not use any tool: the plan streams each tool call in its own message and ends with an empty list, and the app read only that list, so every turn ended after the model said what it would do. A plan reply's tool calls and text now come from the messages it streamed.
+
+- Effort levels for models from other providers: a ChatGPT plan model or a model you added yourself (for example Anthropic Claude Sonnet 5.5) offered no effort level at all in the editors, and an editor asking for one was refused. Each model now offers the levels its own record lists, also on a computer that stores no Meta key.
+
+- ChatGPT plan turns: every model turn failed because the plan route's
+  request wrapped the tools without the namespace description the plan
+  endpoint requires, sent an effort level the model does not list, and
+  threw OpenAI's answer away behind a generic failure. The namespace tool
+  now always carries its description; each plan model takes its context
+  window, reasoning levels, default level and service tiers from the
+  plan's own model catalogue, so a listed level rides as named; every
+  picker (the editor protocol, the panel slider, `exec --effort`) offers
+  those levels with the catalogue default selected; a Fast switch rides
+  the catalogue's priority tier as `service_tier: "priority"` where the
+  model lists one (off by default: it uses more of the plan allowance);
+  and a refused plan request says what OpenAI answered instead of a
+  generic failure, without retrying a 4xx.
+
+- ChatGPT plan sign-in: on some Windows PCs the sign-in failed every time
+  with "temporarily unavailable" because the app held its sign-in lock by
+  listening on a fixed local port (49953) that Windows had reserved for its
+  own use. The lock no longer uses a port at all (a named pipe on Windows,
+  a socket in a private folder on macOS and Linux), and a lock that cannot
+  be opened for a local reason now says so with the operating system's code
+  instead of "temporarily unavailable".
+
+- ChatGPT plan sign-in: OpenAI refused the sign-in because the app sent
+  its host identifier in a form OpenAI does not accept (a bare random
+  string). The app now sends the documented form (`urn:uuid:` plus one
+  generated value, kept for the host's life); a stored old identifier is
+  replaced in place before the next sign-in, and existing grants keep
+  working. When OpenAI refuses a sign-in request, the message now says
+  what OpenAI answered instead of a generic failure.
+
+- ChatGPT plan sign-in on Windows: after you approved the sign-in in the
+  browser, the terminal agent still said "ChatGPT is temporarily
+  unavailable" and kept nothing. Windows Credential Manager holds at most
+  1,280 characters per entry, and the sign-in record (two tokens) is
+  longer. The agent now keeps any secret longer than that as several
+  entries behind a short header, checks them when it reads them back, and
+  removes the old ones when it replaces or deletes the secret. A
+  credential store that refuses a ChatGPT record now says it is the
+  credential store, not ChatGPT.
 - Provider refusals read as the provider's refusal (lane PROVERR): when a
   configured provider answers with an error — out of credit, a rejected key,
   rate-limited, overloaded, an invalid request and the rest — the turn ends

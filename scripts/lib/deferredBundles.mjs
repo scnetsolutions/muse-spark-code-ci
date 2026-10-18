@@ -15,7 +15,10 @@ export const BUNDLES = {
 }
 export const SUBSCRIPTION_ONLY = [
   'src/core/providers/subscriptions/chatgpt.ts',
+  'src/core/providers/subscriptions/chatgptHostId.ts',
   'src/core/providers/subscriptions/registry.ts',
+  // The plan catalogue's entry parse, read by the registry beside it.
+  'src/core/providers/subscriptions/chatgptPlanFacts.ts',
 ]
 export const CONFIGURED_TRANSPORT_ONLY = ['authSource.ts', 'providerClient.ts']
 export const SHARED_TRANSPORT_ONLY = ['transport.ts', 'sse.ts', 'ndjson.ts']

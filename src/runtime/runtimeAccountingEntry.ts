@@ -293,7 +293,7 @@ export function withRuntimeAccounting(
   const resolve = async (ref: string) =>
     wrap(
       client.models === undefined
-        ? metaResolvedModel(ref, client)
+        ? metaResolvedModel(ref, client, await client.planModelFacts?.(ref))
         : await client.models.resolve(ref),
     )
   return {
@@ -309,7 +309,13 @@ export function withRuntimeAccounting(
     ...(client.modelContextLimit !== undefined && {
       modelContextLimit: client.modelContextLimit.bind(client),
     }),
+    ...(client.planModelFacts !== undefined && {
+      planModelFacts: client.planModelFacts.bind(client),
+    }),
     ...(client.isPlanModel !== undefined && { isPlanModel: client.isPlanModel.bind(client) }),
+    ...(client.listPlanModels !== undefined && {
+      listPlanModels: client.listPlanModels.bind(client),
+    }),
     ...(client.readPlanUsage !== undefined && { readPlanUsage: client.readPlanUsage.bind(client) }),
     models: { ...(client.models?.list !== undefined && { list: client.models.list }), resolve },
     async *streamResponse(body, ...args) {
