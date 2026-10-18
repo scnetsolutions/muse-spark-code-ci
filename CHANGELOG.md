@@ -14,6 +14,15 @@ happened, not what was planned; superseded entries are kept.
   saved", although nothing was wrong with the ledger. Windows answers a lock
   that is just being released differently from one that is held; the product
   now waits for both the same way, within the same one-second bound.
+- On Windows, the time a process started (how a lock or a pending checkout
+  tells its live owner from a later process with the same id) is read by a
+  small reader that Windows' own C# compiler builds for each process in
+  `%LOCALAPPDATA%\Muse Spark Code\native`, instead of by Windows PowerShell.
+  Windows PowerShell's first start on a hosted CI runner took longer than
+  the 10-second bound, so the read came back empty and a lease test failed.
+  When the host runs elevated, what it builds there carries a High integrity
+  label, so a lower-integrity process of the same person cannot replace it.
+  Not yet run in the packed product.
 
 ### Release infrastructure
 
