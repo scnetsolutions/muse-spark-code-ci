@@ -15657,7 +15657,9 @@ cached: "0.15", currency: "USD" }`, `isDefault`, `isActive`, `releaseDate`.
 
 **Status 2026-10-10: building.** F1a builds the internal B1 runner and
 native confinement boundary; it stays off and has no command, setting or
-panel entry until its platform receipts and fresh reviews pass. Q-D107 is
+panel entry until its platform receipts and fresh reviews pass. On main the
+B1 runner (`src/core/judge/fast/inspectExec.ts`) refuses every platform but
+Linux, so macOS, which D107 plans for B1, is not yet supported. Q-D107 is
 answered by the owner (B), so lane F is underway. Design:
 `docs/design/judge-fast-path.md`, revised
 after the third, fourth and fifth reviews (`RVJUDGEFAST3` to
@@ -24540,6 +24542,16 @@ Until then nothing is built for it.
 
 ### M100 — Paired devices as lane pools (D80, planned)
 
+**Status 2026-10-17: building.** On main, two unwired halves are written
+and nothing uses either: the receiving device's admission check
+(`src/host/devices/deviceReceiver.ts`) and the sender-side `RemoteAccountPool`
+(`src/core/team/remotePool.ts`, which validates offers and placements, selects
+routes, obtains claims and dispatches requests while keeping sticky/limit
+state; the file also holds the request contract). `knip.jsonc` lists both
+files as built ahead of their wiring (the pool under M96's team runtime, the
+receiver under M100). Phase 2 is not merged, so no pairing, listener,
+discovery or remote execution is on main.
+
 **Status 2026-10-09: built.** Phase 2 accepted, not yet merged.
 
 **Status 2026-10-05: documentation only on `feature/m100-multi-device`.**
@@ -24677,7 +24689,10 @@ are no longer blocked by it.
 
 **Status 2026-09-26: M62a built and certified**
 (`docs/certification/m62.md`); the other forks and the first Open VSX
-listing are M62b.
+listing are M62b. Eclipse Theia and code-server ran the extension only
+against the fake Muse Code CLI, by hand (`docs/certification/m62.md`) and
+in `hosts.yml` jobs deleted on 2026-10-17 (`docs/real-life/unproven.md`),
+so they are not yet tried for real.
 
 - **Archived.** The full section is in [docs/plan-archive/milestones.md](docs/plan-archive/milestones.md).
 
@@ -24687,7 +24702,10 @@ listing are M62b.
 (`docs/certification/m63.md`); M63b run in Emacs, Neovim, Zed and
 JupyterLab, and in CI (below); M63c's MCP servers and paid features built,
 joined with M57, M58 and PR #49's sign-in
-(`docs/certification/pr32-integration.md`).
+(`docs/certification/pr32-integration.md`). Every M63b run drove the same
+fake Muse Code CLI (`docs/certification/m63.md`): Zed by hand only, and
+Emacs, Neovim and JupyterLab by hand and in `hosts.yml` jobs deleted on
+2026-10-17. None of these editors has yet held a real conversation.
 
 - **Archived.** The full section is in [docs/plan-archive/milestones.md](docs/plan-archive/milestones.md).
 
