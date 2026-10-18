@@ -40,6 +40,7 @@ import { ApiKeyAuthSource, NoAuthSource } from '../backends/modelapi/authSource'
 import { CodecClient, type WireCodec } from '../backends/modelapi/providerClient'
 import {
   RequestTransport,
+  abortableSleep,
   parseJsonResponse,
   ModelApiError,
   assertConfirmedAllowed,
@@ -90,6 +91,14 @@ export interface ConfiguredProviderOptions {
    * only time limit on an inference stream: there is no limit on its total.
    */
   readonly streamIdleMs?: number
+  /**
+   * Lane RETRYLIMITS: the person's `museSpark.modelApiMaxRetries` setting,
+   * read live so a change applies without a restart. Set, it caps every
+   * configured provider's retries; unset, each preset's documented maximum
+   * governs, and a preset that documents none retries until the provider's
+   * own wait or stop answer ends it.
+   */
+  readonly personCap?: () => number | undefined
 }
 const secretSchema = z.object({
   v: z.literal(1),
@@ -360,6 +369,8 @@ export function createConfiguredProviderServices(
     listModels: () => delegate().listModels(),
     retryDelayMs: (attempt) => delegate().retryDelayMs(attempt),
     waitBeforeRetry: (delay, signal) => delegate().waitBeforeRetry(delay, signal),
+    maxRetries: () => delegate().maxRetries(),
+    personCap: () => delegate().personCap(),
     countInputTokens: (body) => delegate().countInputTokens(body),
     streamResponse: (body, ...args) => delegate().streamResponse(body, ...args),
     createImage: (...args) => delegate().createImage(...args),
@@ -463,10 +474,9 @@ export function createConfiguredProviderServices(
     return {
       auth,
       transport: {
-        sleep: (ms: number) =>
-          new Promise<void>((done) => {
-            setTimeout(done, ms)
-          }),
+        // Lane PR225FIX2: a Stop clears the wait's own timer, so an
+        // abandoned wait leaves none behind.
+        sleep: abortableSleep,
         now: Date.now,
         random: Math.random,
         streamIdleMs: idleMs,
@@ -480,6 +490,14 @@ export function createConfiguredProviderServices(
         // codes (never what a server wrote) and that whether the request
         // arrived is unknown (lane PROVERRORS).
         sendFailure: providerFailureReader(entry, preset).sendFailure,
+        // Lane RETRYLIMITS: the preset's documented retry bounds
+        // (`FormatQuirks.retryLimits`: the format default plus the preset's
+        // own override, so e.g. xAI's 4 and Azure's 10 are read), and the
+        // person's setting when set.
+        retryLimits: presets.quirksOf(preset).retryLimits,
+        ...(options.personCap !== undefined && {
+          personCap: options.personCap,
+        }),
         fetch: async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
           let requestUrl: string
           if (typeof url === 'string') requestUrl = url
@@ -1026,6 +1044,9 @@ export function createConfiguredProviderServices(
       currentKeyDigest: client.currentKeyDigest,
       retryDelayMs: client.retryDelayMs,
       waitBeforeRetry: client.waitBeforeRetry,
+      // This provider's own limit (its preset's documented maximum, or the
+      // person's setting), never `base`'s, which answers for Meta (PR #225).
+      maxRetries: () => client.maxRetries(),
       listModels: () => Promise.resolve([ref]),
       // UTF-8 bytes bound text tokens conservatively and include tool schemas.
       countInputTokens: (body) => Promise.resolve(Buffer.byteLength(JSON.stringify(body))),

@@ -12,13 +12,13 @@ import {
 import {
   MODEL_API_BASE_URL,
   PACING_ADMISSION_TIMEOUT_MS,
-  MODEL_API_MAX_RETRIES,
   HTTP_TOO_MANY_REQUESTS,
   HTTP_STATUS,
   PROVIDER_RETRY_HTTP_STATUS,
   MODEL_API_RETRY_BASE_MS,
   MODEL_API_RETRY_JITTER_MS,
   MODEL_API_RETRY_MAX_MS,
+  MODEL_API_TIMER_MAX_MS,
   MILLISECONDS_PER_SECOND,
   UI_TEXT,
   PROVIDER_HTTP_BODY_MAX_BYTES,
@@ -36,7 +36,15 @@ interface PaidRequestClaim {
 }
 import type { MediaRequestAccounting } from '../../media/mediaCost'
 import { fill } from '../../../shared/l10n/text'
-import { classifyRetry, RETRY_TABLES, type RetryTables } from '../../../shared/retryPolicy'
+import {
+  classifyRetry,
+  effectiveMaxRetries,
+  META_DOCUMENTED_RETRY_LIMITS,
+  RETRY_TABLES,
+  retryDelayMs,
+  type RetryLimits,
+  type RetryTables,
+} from '../../../shared/retryPolicy'
 import type { CoreLogger } from '../../logging'
 import {
   describeNetworkFailure,
@@ -79,7 +87,29 @@ export interface TransportDeps {
   readonly parseError?: (status: number, body: unknown, headers: Headers) => ModelApiError
   /** The preset's own retry table (OPENAI-G20); defaults to the Responses table. */
   readonly retryTable?: RetryTables
-  readonly sleep: (ms: number) => Promise<void>
+  /**
+   * The provider's documented retry bounds (lane RETRYLIMITS,
+   * `FormatQuirks.retryLimits`); the Model API transport defaults to Meta's
+   * own 3–5 attempts. Absent fields are values the provider does not
+   * document: the person's setting decides, and with none set the
+   * provider's own Retry-After (or stop answer) governs.
+   */
+  readonly retryLimits?: RetryLimits
+  /**
+   * The person's `museSpark.modelApiMaxRetries` setting, read live so a
+   * change applies without a restart; undefined (or absent) leaves the
+   * provider's documented maximum in force.
+   */
+  readonly personCap?: (() => number | undefined) | undefined
+  /**
+   * One timer chunk of a retry wait. A cooperating sleep clears its own
+   * timer when `signal` aborts (see `abortableSleep`); one that ignores
+   * the signal is abandoned by `pause`'s race exactly as before. Absent,
+   * the transport waits with `abortableSleep` (lane PR225W1: every
+   * production wait dies with Stop, with no per-client wiring to pay for
+   * in the activation bundle); tests keep injecting their own sleep.
+   */
+  readonly sleep?: ((ms: number, signal?: AbortSignal) => Promise<void>) | undefined
   readonly now: () => number
   readonly random: () => number
   readonly log: CoreLogger
@@ -381,11 +411,20 @@ export function providerWaitMs(headers: Headers, now: number): number | undefine
   return retryAfterMs(headers.get(RETRY_AFTER_HEADER), now)
 }
 
+/** One transport's documented retry bounds: Meta's own when unset. */
+function documentedLimits(deps: TransportDeps): RetryLimits {
+  return deps.retryLimits ?? META_DOCUMENTED_RETRY_LIMITS
+}
+
 /** One retry the client is about to make, for the transcript's notice. */
 export interface RetryNotice {
   readonly phase?: 'pacing'
   readonly attempt: number
-  readonly maxAttempts: number
+  /**
+   * The retries allowed, absent when neither the provider nor the person
+   * sets one: the provider's own Retry-After (or stop answer) governs.
+   */
+  readonly maxAttempts: number | undefined
   readonly delayMs: number
   readonly reason: string
 }
@@ -393,10 +432,25 @@ export interface RetryNotice {
 /**
  * The retries one model call has used (the review of PR #28): a stream sent
  * again whole and the HTTP retries inside each of its requests draw on the
- * same MODEL_API_MAX_RETRIES.
+ * same per-provider budget (lane RETRYLIMITS).
  */
 export interface RetryBudget {
   retriesUsed: number
+}
+
+/**
+ * Loop bound when no retry limit applies: the largest count, so only the
+ * provider's own stop answers end the loop. A budget starting here refuses
+ * every retry (see `noRetryBudget`).
+ */
+export const UNBOUNDED_RETRIES = Number.MAX_SAFE_INTEGER
+
+/**
+ * A budget that refuses every retry before the first try: key checks and
+ * other single-attempt paths spend it, so their loop bound is already met.
+ */
+export function noRetryBudget(): RetryBudget {
+  return { retriesUsed: UNBOUNDED_RETRIES }
 }
 
 /** In-memory identity of an explicitly confirmed scheduled Model API run. */
@@ -543,12 +597,42 @@ function whenAborted(signal: AbortSignal): { readonly promise: Promise<never>; d
   }
 }
 
+/**
+ * Production `TransportDeps.sleep` (lane PR225FIX2): a real timer cleared
+ * the moment `signal` aborts, so a retry wait a Stop abandons leaves no
+ * timer behind (deliberately still referenced while it runs: an unaborted
+ * wait holds the process exactly as before, only an abandoned one is
+ * gone). Resolves early on abort; the caller observes the abort itself
+ * (`pause`'s race rejects with the turn's cancellation, registered before
+ * this listener).
+ */
+export function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise<void>((done) => {
+    if (signal?.aborted === true) {
+      done()
+      return
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      done()
+    }, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      done()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 const ownerPacers = new WeakMap<object, RequestPacer>()
 
 export class RequestTransport {
   private static hasLoggedObservationFailure = false
   private readonly pacing: RequestPacer
+  /** The chunk sleep, defaulting to the production one (see `TransportDeps.sleep`). */
+  private readonly sleep: (ms: number, signal?: AbortSignal) => Promise<void>
   public constructor(private readonly deps: TransportDeps) {
+    this.sleep = deps.sleep ?? abortableSleep
     this.pacing =
       deps.pacing ??
       (deps.pacingOwner === undefined ? undefined : ownerPacers.get(deps.pacingOwner)) ??
@@ -694,19 +778,32 @@ export class RequestTransport {
     return response
   }
 
+  /**
+   * Waits `ms` whole, or rejects as soon as `signal` aborts. A timer holds
+   * at most `MODEL_API_TIMER_MAX_MS` and a longer delay fires after 1 ms, so
+   * a longer wait is slept in pieces no larger than that (PR #225): the
+   * provider is never asked again before the wait it named or the backoff
+   * it was given.
+   */
   public async pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
-    if (signal === undefined) {
-      await this.deps.sleep(ms)
-      return
-    }
-    if (signal.aborted) {
+    if (signal?.aborted === true) {
       throw new ModelApiError('cancelled', NETWORK_FAILURE_STATUS, undefined, undefined)
     }
-    const aborted = whenAborted(signal)
+    const aborted = signal === undefined ? undefined : whenAborted(signal)
     try {
-      await Promise.race([this.deps.sleep(ms), aborted.promise])
+      let remaining = ms
+      do {
+        const piece = Math.min(remaining, MODEL_API_TIMER_MAX_MS)
+        // The stop reaches the chunk's own timer through the injected
+        // sleep: a cooperating sleep clears it, so no timer outlives the
+        // stop. The race stays, so a sleep that ignores the signal is
+        // abandoned exactly as before and Stop stays prompt.
+        const slept = this.sleep(piece, signal)
+        await (aborted === undefined ? slept : Promise.race([slept, aborted.promise]))
+        remaining -= piece
+      } while (remaining > 0)
     } finally {
-      aborted.dispose()
+      aborted?.dispose()
     }
   }
 
@@ -840,13 +937,35 @@ export class RequestTransport {
     }
   }
 
+  /**
+   * The retries one call may use (lane RETRYLIMITS): the person's
+   * `museSpark.modelApiMaxRetries` setting when set, else the provider's
+   * documented maximum, else undefined (unbounded: the provider's own
+   * Retry-After waits and stop answers govern the loop).
+   */
+  public maxRetries(): number | undefined {
+    return effectiveMaxRetries(this.deps.personCap?.(), documentedLimits(this.deps))
+  }
+
+  /**
+   * The person's live retry limit, before any provider maximum caps it
+   * (lane PR225W1): the turn loop reads it to tell a person-set cap stop
+   * from a provider refusal on the orchestrator's feed.
+   */
+  public personCap(): number | undefined {
+    return this.deps.personCap?.()
+  }
+
   public backoffMs(attempt: number, suggestedMs?: number): number {
-    const jitter = Math.floor(this.deps.random() * MODEL_API_RETRY_JITTER_MS)
     // The provider's own wait is the least it asks for (every provider
     // documents it so): waited out whole, never shortened to our backoff.
-    if (suggestedMs !== undefined) return suggestedMs + jitter
-    const exponential = Math.min(MODEL_API_RETRY_BASE_MS * 2 ** attempt, MODEL_API_RETRY_MAX_MS)
-    return Math.min(exponential + jitter, MODEL_API_RETRY_MAX_MS)
+    return retryDelayMs(
+      attempt,
+      documentedLimits(this.deps),
+      suggestedMs,
+      this.deps.random(),
+      MODEL_API_RETRY_JITTER_MS,
+    )
   }
 
   /**
@@ -901,18 +1020,28 @@ export class RequestTransport {
         undefined,
       )
     }
-    const retry = async (attempt: number, delay: number, reason: string) => {
+    const retry = async (
+      attempt: number,
+      delay: number,
+      reason: string,
+      refused: ModelApiError,
+    ) => {
       if (budget !== undefined) {
         budget.retriesUsed = attempt + 1
       }
       this.observe(admitAttempt, { retries: attempt + 1 })
+      const allowed = this.maxRetries()
       onRetry?.({
         attempt: attempt + 1,
-        maxAttempts: MODEL_API_MAX_RETRIES + 1,
+        maxAttempts: allowed === undefined ? undefined : allowed + 1,
         delayMs: delay,
         reason,
       })
       await this.pause(delay, signal)
+      // Lane PR225W1: the person's limit is live — a change mid-wait (to 0
+      // during a long Retry-After) refuses the dispatch the pre-wait check
+      // accepted, instead of sending one request past the new ceiling.
+      if (attempt >= (this.maxRetries() ?? UNBOUNDED_RETRIES)) throw refused
     }
     // How long the answer took, retries included, at trace level (M39).
     const startedAt = this.deps.now()
@@ -982,14 +1111,16 @@ export class RequestTransport {
               kind,
               init.estimatedTokens ?? 0,
               AbortSignal.any([signal ?? new AbortController().signal, admission.signal]),
-              (delayMs) =>
+              (delayMs) => {
+                const allowed = this.maxRetries()
                 onRetry?.({
                   phase: 'pacing',
                   attempt,
-                  maxAttempts: MODEL_API_MAX_RETRIES + 1,
+                  maxAttempts: allowed === undefined ? undefined : allowed + 1,
                   delayMs,
                   reason: UI_TEXT.modelApiPacingWaiting,
-                }),
+                })
+              },
             ),
             PACING_ADMISSION_TIMEOUT_MS,
             UI_TEXT.modelApiPacingExpired,
@@ -1101,14 +1232,21 @@ export class RequestTransport {
         const reason = credentials.redact(
           this.deps.sendFailure?.(error) ?? networkFailureMessage(error, this.deps.networkAdvice),
         )
-        if (isRateLimitOnly || attempt >= MODEL_API_MAX_RETRIES) {
-          throw new ModelApiError(reason, NETWORK_FAILURE_STATUS, undefined, undefined)
+        // Lane PR225FIX2: an unanswered send is ambiguous — the request may
+        // have arrived and executed — so it is sent again only within an
+        // explicit bound (the person's setting or the provider's documented
+        // maximum). With neither, the failure ends the request here instead
+        // of replaying a possibly-executed paid send without end.
+        const allowed = this.maxRetries()
+        const refused = new ModelApiError(reason, NETWORK_FAILURE_STATUS, undefined, undefined)
+        if (isRateLimitOnly || allowed === undefined || attempt >= allowed) {
+          throw refused
         }
         const delay = this.backoffMs(attempt, undefined)
         this.deps.log.warn(
           `Model API request failed to send (${credentials.redact(describeNetworkFailure(error).detail)}); retrying in ${String(delay)} ms`,
         )
-        await retry(attempt, delay, reason)
+        await retry(attempt, delay, reason, refused)
         continue
       }
       if (shouldObserveLimits)
@@ -1172,7 +1310,7 @@ export class RequestTransport {
       const isRetryable =
         (this.deps.isRetryableFailure?.(failure) ?? decision.retry) &&
         (!isRateLimitOnly || response.status === HTTP_TOO_MANY_REQUESTS)
-      if (!isRetryable || attempt >= MODEL_API_MAX_RETRIES) {
+      if (!isRetryable || attempt >= (this.maxRetries() ?? UNBOUNDED_RETRIES)) {
         if (
           response.status >= HTTP_STATUS.internalServerError &&
           provider.identity.provider === 'meta'
@@ -1199,7 +1337,7 @@ export class RequestTransport {
           credentials.keyDigest,
           signal ?? new AbortController().signal,
         )
-      await retry(attempt, delay, `HTTP ${String(response.status)}: ${failure.message}`)
+      await retry(attempt, delay, `HTTP ${String(response.status)}: ${failure.message}`, failure)
     }
   }
 }
