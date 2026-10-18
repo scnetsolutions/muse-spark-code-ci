@@ -62,6 +62,7 @@ import {
   FILE_REFUSAL_MODEL_TEXT,
   MENTION_INDEX_LIMIT,
   MODEL_API_BUNDLE_FILE,
+  MUSE_CODE_BUNDLE_FILE,
   PAGE_WORKER_FILE,
   SEARCH_WORKER_FILE,
   SECRET_KEYS,
@@ -192,6 +193,8 @@ function museCodeManager(deps: RuntimeBackendDeps, workspaceRoot: string | undef
       : undefined
   return new Manager({
     ...(windowsJobAssembly !== undefined && { shellJobAssembly: windowsJobAssembly }),
+    bundlePath: path.join(deps.distDir, MUSE_CODE_BUNDLE_FILE),
+    usageRecording: deps.usageRecording,
     // This records the actual scope boundary; it does not certify a VS Code fence.
     beforeWorkspaceHostStart: () => independentEditorStartupPolicy(log),
     log,
@@ -293,6 +296,8 @@ function modelApiManager(
             log: warn,
           })
         : undefined,
+    // The ACP agent exposes no hook-concurrency setting (D62).
+    hookMaxRunningCommands: () => SETTING_DEFAULTS.hooksMaxRunningCommands,
   })
   // Muse Code's memory (M49, PLAN.md D41), in the data home `muse serve` sees.
   const warnMemory = (message: string) => {
@@ -515,6 +520,9 @@ function modelApiManager(
     strictTools: () => SETTING_DEFAULTS.modelApiStrictTools,
     parallelReads: () => SETTING_DEFAULTS.modelApiParallelReads,
     webSearchMaxPerRequest: () => SETTING_DEFAULTS.webSearchMaxPerRequest,
+    hookMaxStopContinuations: () => SETTING_DEFAULTS.hooksMaxStopContinuations,
+    hookMaxRunningCommands: () => SETTING_DEFAULTS.hooksMaxRunningCommands,
+    subagentMaxConcurrent: () => SETTING_DEFAULTS.subagentMaxConcurrent,
     isAutoCompactionOn: () =>
       deps.options.autoCompaction ?? SETTING_DEFAULTS.modelApiAutoCompaction,
     autoCompactionEvaluated: () => IS_AUTO_COMPACTION_EVALUATED,
