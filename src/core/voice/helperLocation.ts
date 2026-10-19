@@ -20,9 +20,9 @@ import {
   WINDOWS_POWERSHELL_RELATIVE_PATH,
   WINDOWS_PSMODULEPATH_VARIABLE,
 } from '../../shared/constants'
-import { setEnvironmentVariable, windowsPowerShellModulePath } from '../backends/musecode/launch'
-import { resolveExecutable } from '../executables'
 import type { HelperInvocation } from './dictation'
+import { setEnvironmentVariable, windowsPowerShellModulePath } from '../execGuard'
+import { resolveExecutable } from '../execGuard'
 
 export interface HelperProbe {
   readonly platform: NodeJS.Platform
@@ -183,12 +183,24 @@ export type CaptureLocation =
       readonly name: string
       readonly command: string
       readonly args: readonly string[]
+      /** The workspace the lookup excluded: the recorder child runs guarded for it. */
+      readonly workspaceRoot: string
     }
   | { readonly isAvailable: false; readonly reason: string }
 
 export interface CaptureProbe extends HelperProbe {
   /** PATH, for Linux's recorders (absolute entries only, PLAN.md D24). */
   readonly pathVariable: string | undefined
+  /**
+   * The workspace a recording runs in: `arecord`/`parec` never resolve to
+   * a file inside it (resolved through links). REQUIRED.
+   */
+  readonly workspaceRoot: string
+  /**
+   * Resolves links for the workspace comparison. REQUIRED: a lexical-only
+   * comparison keeps a symlink into the workspace on PATH.
+   */
+  readonly realpath: (filePath: string) => string
 }
 
 /**
@@ -211,6 +223,7 @@ export function locateCaptureHelper(probe: CaptureProbe): CaptureLocation {
       platform: probe.platform,
       pathVariable: probe.pathVariable,
       fileExists: probe.fileExists,
+      scope: { workspaceRoot: probe.workspaceRoot, realpath: probe.realpath },
     })
     if (command !== undefined) {
       return {
@@ -219,6 +232,7 @@ export function locateCaptureHelper(probe: CaptureProbe): CaptureLocation {
         name: recorder.command,
         command,
         args: recorder.args,
+        workspaceRoot: probe.workspaceRoot,
       }
     }
   }

@@ -7,6 +7,99 @@ happened, not what was planned; superseded entries are kept.
 
 ## [Unreleased]
 
+### Security
+
+- Starting Muse Code no longer lets a program planted in the workspace run
+  from PATH. Every child environment built for `muse serve` (the VS Code
+  backend, the ACP agent and the CLI exec path) drops PATH entries that are
+  relative, empty, or inside the workspace (resolved through links), on
+  Windows, macOS and Linux alike; nothing else in PATH changes. A PATH with
+  nothing left is removed rather than emptied, a PATH from
+  `museSpark.environmentVariables` is sanitized the same way, Windows
+  drive-relative entries are resolved on the workspace drive, and guarded
+  Windows children set `NoDefaultCurrentDirectoryInExePath` so the working
+  directory is not tried before PATH. Forward-slash UNC (`//server/share`),
+  verbatim (`\\?\`, `//?/`) and loopback admin-share (`//localhost/C$/…`)
+  spellings of the workspace compare as the workspace itself, and the entry
+  is always resolved as itself, never as a drive-rewritten path. The guard
+  also covers `muse login` and the runtime account host (scoped to the
+  directory the child runs in, which is also set as its working directory),
+  the Windows sandbox check and setup, and the `muse` and `git` lookups
+  themselves: directories inside the workspace are never probed, so a
+  planted program on an absolute workspace PATH entry never resolves.
+  Device (`\\.\`), trailing-dot (`repo.\…`) and dot-dot (`..\…`) spellings
+  of the workspace compare as the workspace itself before comparing, and
+  the same exclusion (resolved through links) now covers every other
+  product lookup: `git` (all runners, the M123 native route and the report
+  source), the plugin runtimes (`node`, `bun`, `prlimit`), MCP server
+  commands, the shell and hook interpreters (`bash`, `sh`, `cmd`), the
+  usage opener (`xdg-open`, `open`, `rundll32.exe`), the Linux voice
+  recorders (`arecord`, `parec`) and the team worker launcher. Every child
+  started with the workspace as its working directory also gets the
+  guarded PATH plus `NoDefaultCurrentDirectoryInExePath` on Windows, so a
+  planted helper (`ssh`, `git-remote-https`) never runs either. A new
+  inventory test enumerates every process start in `src/` from the source
+  itself and fails on any start outside the guarded routes or the short
+  reviewed list (fixed OS paths, the person's own terminal).
+  Real use showed Muse Code 1.4.9 running a planted `<workspace>/bin/bwrap`
+  twice at serve start, before any prompt or approval
+  (`docs/certification/pathguard.md`).
+
+- PATH lookups closed at their cause (round 5): the playbook resolves
+  `git` outside the workspace and admits and spawns it absolute with the
+  guarded child env, so the supervisor's command is never a bare name;
+  team `setpriv`/`systemd-run`/`systemctl` probe on the absolute PATH
+  entries only and resolve outside each launch's own directory with the
+  guarded child env (a tool the probe saw but that directory shadows
+  fails the launch closed); the ACP agent and setup hooks pass their
+  workspace into the shell lookup, so `bash`/`sh` resolve outside it; an
+  absolute `SHELL` inside the workspace is ignored for hooks and `sh`
+  resolves outside instead; Windows comparisons strip trailing spaces
+  and a single trailing dot the way `GetFullPathName` does (`repo .` is
+  the workspace, a non-final `repo...` stays a distinct name). The spawn
+  inventory now also enumerates wrapper starts (literal or variable
+  command) and embedded supervisor scripts, and fails on any start
+  outside the guarded routes or the reviewed lists.
+
+- Forgetting the guard is now a type error (round 6): the executable
+  lookup and every wrapper of it take the workspace root and the link
+  resolver as required parameters, with no default resolver — a probe
+  with genuinely no workspace passes an explicit absolute-entries-only
+  value — and the `runProgram`/`runTreeSync` runners and the plugin
+  spawn take a branded child environment only the guarded builders can
+  produce, so a raw environment no longer type-checks there. Fixed at
+  the cause through those types: the team probe never searches PATH
+  (fixed `/usr/bin/setpriv` and `/usr/bin/systemd-run` with an
+  absolute `true` under the no-workspace environment; the launch still
+  re-resolves outside its own directory); the report's `gh` resolves
+  with the report workspace and an absolute path inside it is refused
+  like a bare name there; the production plugin lookup follows links;
+  a linked playbook worktree's directory is sanitized as well as the
+  main workspace, so a helper git starts by bare name never runs from
+  either; the Linux recorder child runs with the guarded environment
+  for the recording workspace. The inventory also enumerates the
+  governed command boundary and its aliases, and pins the branded
+  signatures so loosening one fails the gate.
+
+- Every process start takes the branded child environment (round 7):
+  direct `child_process` starts move behind one guarded wrapper
+  (`spawnGuarded`/`execFileGuarded` take only the brand), and a native
+  helper payload serializes only from the brand, so the Windows team
+  payload hole — a `string[]` the compiler could not see — is closed
+  with its class: the `RunTeam` block is built from the same guarded
+  environment the POSIX launch uses for its cwd, and the `RunTeam`
+  executable itself is resolved to an absolute file outside the
+  workspace first (a bare name on the absolute `PATH` entries,
+  PATHEXT included; a `.cmd`/`.bat` hit goes through the absolute
+  `cmd.exe`), because `CreateProcessW` completes a partial
+  `lpApplicationName` from the helper's working directory. The serve/login
+  builder returns the brand through the same producers, and the
+  producers guard every `PATH` spelling and drop a preset
+  `NoDefaultCurrentDirectoryInExePath` on Windows. The inventory fails
+  on any direct starter outside the two sanctioned modules or any
+  second cast to the brand. (`test/unit/pathGuardRound7.test.ts`,
+  `test/unit/pathGuardSpawns.test.ts`)
+
 ### Fixed
 
 - On Windows, two requests that reserve session spend at the same moment

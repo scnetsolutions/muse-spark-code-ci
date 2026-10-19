@@ -22,9 +22,6 @@
 // the tolerance cannot be told apart; a birth that cannot be read proves
 // nothing. Queries use absolute paths, no shell, and a timeout.
 
-import { execFile } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
-import { hostname } from 'node:os'
 import path from 'node:path'
 import * as z from 'zod/mini'
 import {
@@ -32,6 +29,12 @@ import {
   PROCESS_START_QUERY_TIMEOUT_MS,
   PROCESS_START_TOLERANCE_MS,
 } from '../../shared/constants'
+import { type GuardedChildEnv } from '../executables'
+import { noWorkspaceChildEnvironment } from '../execGuard'
+import { readFile } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
+import { hostname } from 'node:os'
+import { execFileGuarded } from '../guardedChildProcess'
 
 const NO_SUCH_PROCESS = 'ESRCH'
 // `/proc/<pid>/stat` after the command's closing parenthesis: field 3 is
@@ -62,15 +65,15 @@ function errorCode(error: unknown): string | undefined {
     : undefined
 }
 
-function run(file: string, args: readonly string[], env?: NodeJS.ProcessEnv): Promise<string> {
+function run(file: string, args: readonly string[], env: GuardedChildEnv): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(
+    execFileGuarded(
       file,
       [...args],
       {
         timeout: PROCESS_START_QUERY_TIMEOUT_MS,
         windowsHide: true,
-        ...(env !== undefined && { env }),
+        env,
       },
       (error, stdout) => {
         if (error === null) {
@@ -96,11 +99,16 @@ async function linuxStartTicks(pid: number): Promise<number | undefined> {
 
 async function darwinStartTime(pid: number): Promise<number | undefined> {
   // `lstart` in the C locale and UTC: "Thu Oct  9 08:05:19 2026".
-  const output = await run('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], {
-    ...process.env,
-    LC_ALL: 'C',
-    TZ: 'UTC0',
-  })
+  // Fixed `/bin/ps`: absolute entries only, links followed.
+  const output = await run(
+    '/bin/ps',
+    ['-o', 'lstart=', '-p', String(pid)],
+    noWorkspaceChildEnvironment(
+      process.platform,
+      { ...process.env, LC_ALL: 'C', TZ: 'UTC0' },
+      realpathSync,
+    ),
+  )
   const started = Date.parse(`${output.trim()} GMT`)
   return Number.isFinite(started) ? started : undefined
 }
@@ -119,13 +127,18 @@ async function windowsStartTime(pid: number): Promise<number | undefined> {
     'v1.0',
     'powershell.exe',
   )
-  const output = await run(powershell, [
-    '-NoLogo',
-    '-NoProfile',
-    '-NonInteractive',
-    '-Command',
-    `[DateTimeOffset]::new((Get-Process -Id ${String(pid)} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`,
-  ])
+  // Absolute SystemRoot PowerShell: absolute entries only, links followed.
+  const output = await run(
+    powershell,
+    [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      `[DateTimeOffset]::new((Get-Process -Id ${String(pid)} -ErrorAction Stop).StartTime).ToUnixTimeMilliseconds()`,
+    ],
+    noWorkspaceChildEnvironment(process.platform, process.env, realpathSync),
+  )
   const text = output.trim()
   return DECIMAL.test(text) ? Number(text) : undefined
 }

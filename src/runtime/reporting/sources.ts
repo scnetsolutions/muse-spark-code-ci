@@ -1,6 +1,3 @@
-import { execResourceFile } from '../../core/resources/launcher'
-import { constants as fsConstants, existsSync } from 'node:fs'
-import { open, opendir, realpath } from 'node:fs/promises'
 import {
   EXEC_UNTRUSTED_FILE_MAX_BYTES,
   GIT_OUTPUT_MAX_BYTES,
@@ -9,13 +6,6 @@ import {
   REPORT_SOURCE_TIMEOUT_MS,
   SESSION_EXPORT_MAX_BYTES,
 } from '../../shared/constants'
-import { isPrivateFileName } from '../../shared/privateFiles'
-import { withoutCredentials } from '../../core/credentialEnvironment'
-import { resolveExecutable } from '../../core/executables'
-import { handleIdentity, lstatIdentity, sameFile, statIdentity } from '../../core/fs/fileIdentity'
-import { pathModule } from '../../core/workspaceRoot'
-import { isBelow, resolveWorkspacePath } from '../../core/workspacePath'
-import { createLocalReportSources, type LocalReportSourceDeps } from '../../core/reporting/sources'
 import {
   LocalSourceError,
   reportWorkspaceKey,
@@ -28,6 +18,16 @@ import {
   type AgentUsageFile,
   type AgentUsageFiles,
 } from '../../core/reporting/sources/agentUsage'
+import { resolveExecutable, workspaceChildEnvironment } from '../../core/execGuard'
+import { execResourceFile } from '../../core/resources/launcher'
+import { constants as fsConstants, existsSync, realpathSync } from 'node:fs'
+import { open, opendir, realpath } from 'node:fs/promises'
+import { isPrivateFileName } from '../../shared/privateFiles'
+import { withoutCredentials } from '../../core/credentialEnvironment'
+import { handleIdentity, lstatIdentity, sameFile, statIdentity } from '../../core/fs/fileIdentity'
+import { pathModule } from '../../core/workspaceRoot'
+import { isBelow, resolveWorkspacePath } from '../../core/workspacePath'
+import { createLocalReportSources, type LocalReportSourceDeps } from '../../core/reporting/sources'
 
 function isPrivatePath(file: string): boolean {
   return file
@@ -188,11 +188,16 @@ export function reportGitIo(
     platform,
     pathVariable: env['PATH'] ?? env['Path'],
     fileExists: existsSync,
+    scope: { workspaceRoot: root, realpath: realpathSync },
   })
-  const childEnvironment = Object.fromEntries(
-    Object.entries(withoutCredentials(env, [], platform)).filter(
-      ([name]) => !/^(?:GIT_|GCM_)/iu.test(name),
+  const childEnvironment = workspaceChildEnvironment(
+    platform,
+    Object.fromEntries(
+      Object.entries(withoutCredentials(env, [], platform)).filter(
+        ([name]) => !/^(?:GIT_|GCM_)/iu.test(name),
+      ),
     ),
+    { workspaceRoot: root, realpath: realpathSync },
   )
   // Only these read commands are admitted by the source port; no shell, check or hook.
   return {

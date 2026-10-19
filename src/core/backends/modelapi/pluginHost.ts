@@ -1,4 +1,3 @@
-import { resourceEnvironment, type ResourceLease } from '../../resources/launch'
 // M91 lane X: the plugin host. Amp and OpenCode plugins run OUT OF PROCESS
 // in a short-lived child under the user's own runtime (pluginChild.ts is the
 // entry; the host writes one JSON request line on stdin and reads one JSON
@@ -24,12 +23,8 @@ import { resourceEnvironment, type ResourceLease } from '../../resources/launch'
 // - the answer completes on its response line, then the tree is ended [11];
 // - bounds: PLUGIN_HOOK_TIMEOUT_MS per call, PLUGIN_CHILD_MAX_HEAP_MB heap
 //   for node, PLUGIN_RESPONSE_MAX_BYTES UTF-8 bytes per answer frame [14].
-import { Buffer } from 'node:buffer'
-import { admitResource, stopResourceTree } from '../../resources/admission'
 
-import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process'
-import { withoutCredentials } from '../../credentialEnvironment'
-import { statSync } from 'node:fs'
+import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import * as z from 'zod/mini'
 import {
@@ -40,9 +35,16 @@ import {
   PLUGIN_RESPONSE_MAX_BYTES,
   PLUGIN_RUNTIME_PROBE_TIMEOUT_MS,
 } from '../../../shared/constants'
-import { resolveExecutable } from '../../executables'
-import { environmentValue } from '../musecode/launch'
 import type { ForeignHookAnswer } from './hookFormats/contract'
+import { type GuardedChildEnv } from '../../executables'
+import { resolveExecutable, workspaceChildEnvironment } from '../../execGuard'
+import { environmentValue } from '../../execGuard'
+import { resourceEnvironment, type ResourceLease } from '../../resources/launch'
+import { Buffer } from 'node:buffer'
+import { admitResource, stopResourceTree } from '../../resources/admission'
+import { spawnGuarded } from '../../guardedChildProcess'
+import { withoutCredentials } from '../../credentialEnvironment'
+import { statSync } from 'node:fs'
 import { pluginChildSource } from './pluginChild'
 
 export type PluginSystem = 'amp' | 'opencode'
@@ -62,8 +64,12 @@ export interface PluginCall {
 
 export interface PluginSpawnOptions {
   readonly resource?: ResourceLease | undefined
-  /** The child's whole environment: already allowlisted by the caller. */
-  readonly env: NodeJS.ProcessEnv
+  /**
+   * The child's whole environment: already allowlisted and guarded for the
+   * workspace by the caller (only `workspaceChildEnvironment` can produce
+   * one), so a raw environment does not type-check here.
+   */
+  readonly env: GuardedChildEnv
   readonly cwd: string
 }
 
@@ -99,6 +105,18 @@ export interface PluginRunDeps {
    * and the child see; the extension host's own never reaches either.
    */
   readonly env: NodeJS.ProcessEnv
+  /**
+   * The workspace the plugin runs for: `node`, `bun` and `prlimit` are
+   * never resolved to a file inside it (resolved through links), and the
+   * child's PATH carries the guarded child environment for it. REQUIRED:
+   * the production session passes the workspace with `realpathSync`.
+   */
+  readonly workspaceRoot: string
+  /**
+   * Resolves links for the workspace comparison. REQUIRED: a lexical-only
+   * comparison keeps a symlink into the workspace on PATH.
+   */
+  readonly realpath: (filePath: string) => string
   readonly platform?: NodeJS.Platform | undefined
   /** `node --version` / `bun --version` output for an absolute command. */
   readonly runVersion?: ((command: string, env: NodeJS.ProcessEnv) => Promise<string>) | undefined
@@ -136,7 +154,13 @@ async function defaultRunVersion(
   try {
     if (signal?.aborted === true) throw new Error('Plugin runtime probe cancelled')
     child = await tree.spawn(command, ['--version'], {
-      env: resourceEnvironment(env, resource),
+      env: resourceEnvironment(
+        workspaceChildEnvironment(deps.platform ?? process.platform, env, {
+          workspaceRoot: deps.workspaceRoot,
+          realpath: deps.realpath,
+        }),
+        resource,
+      ),
       cwd: path.dirname(command),
       ...(resource !== undefined && { resource }),
     })
@@ -215,6 +239,24 @@ function isAtLeast(have: readonly [number, number, number], want: string): boole
 }
 
 /**
+ * One runtime name by absolute path on the allowlisted PATH, never a file
+ * inside the workspace the plugin runs for (resolved through links).
+ */
+function probeRuntime(
+  name: string,
+  deps: PluginRunDeps,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined {
+  return resolveExecutable(name, {
+    platform,
+    pathVariable: environmentValue(env, platform, 'PATH'),
+    fileExists: deps.fileExists ?? isExistingFile,
+    scope: { workspaceRoot: deps.workspaceRoot, realpath: deps.realpath },
+  })
+}
+
+/**
  * The user's runtime for this plugin system, by absolute path on the
  * allowlisted PATH (D24), or a refusal with a reason: Amp and plain JS need
  * system node >= 22.18 (TS goes through Node's built-in type stripping; the
@@ -232,11 +274,7 @@ export async function resolvePluginRuntime(
     deps.runVersion ??
     ((command: string, env: NodeJS.ProcessEnv) => defaultRunVersion(command, env, deps, signal))
   const name = system === 'amp' ? 'node' : 'bun'
-  const command = resolveExecutable(name, {
-    platform,
-    pathVariable: environmentValue(env, platform, 'PATH'),
-    fileExists: deps.fileExists ?? isExistingFile,
-  })
+  const command = probeRuntime(name, deps, env, platform)
   if (system === 'amp') {
     if (command === undefined) {
       return { ok: false, reason: 'amp: the system node runtime is not installed' }
@@ -295,11 +333,7 @@ function boundedBun(
   if (platform !== 'linux') {
     return { ok: false, reason: `opencode: bun's memory cannot be bounded on ${platform}` }
   }
-  const prlimit = resolveExecutable('prlimit', {
-    platform,
-    pathVariable: environmentValue(env, platform, 'PATH'),
-    fileExists: deps.fileExists ?? isExistingFile,
-  })
+  const prlimit = probeRuntime('prlimit', deps, env, platform)
   if (prlimit === undefined) {
     return { ok: false, reason: 'opencode: prlimit is absent, so bun cannot be bounded' }
   }
@@ -364,7 +398,7 @@ async function didStopRegisteredPlugin(child: PluginChildHandle): Promise<boolea
 /** POSIX: the child leads a process group of its own, killed as one. */
 export const posixProcessTree: PluginProcessTree = {
   spawn: (command, args, options) => {
-    const child = nodeSpawn(command, [...args], {
+    const child = spawnGuarded(command, [...args], {
       env: options.env,
       cwd: options.cwd,
       detached: true,
@@ -611,9 +645,21 @@ async function runInScope(
   }
   let child: PluginChildHandle
   try {
+    // The child runs an absolute runtime, never a workspace file, with the
+    // guarded child PATH for the workspace (links followed), so nothing it
+    // starts by bare name resolves to a program planted there.
+    const pluginDir = path.dirname(call.pluginPath)
     child = await tree.spawn(runtime.command, [...runtime.args, source], {
-      env: resourceEnvironment(withoutCredentials(deps.env), resource),
-      cwd: path.dirname(call.pluginPath),
+      env: resourceEnvironment(
+        withoutCredentials(
+          workspaceChildEnvironment(platform, deps.env, {
+            workspaceRoot: deps.workspaceRoot,
+            realpath: deps.realpath,
+          }),
+        ),
+        resource,
+      ),
+      cwd: pluginDir,
       ...(resource !== undefined && { resource }),
     })
   } catch {

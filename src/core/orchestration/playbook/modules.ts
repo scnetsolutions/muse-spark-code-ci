@@ -1,8 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
-import type { SpawnSyncOptions } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import nodePath from 'node:path'
-import { UI_TEXT } from '../../../shared/l10n/text'
 import {
   playbookModuleSchema,
   type PlaybookModule,
@@ -10,7 +6,6 @@ import {
   type PlaybookRound,
   type PlaybookDesignDecision,
 } from '../../../shared/playbook'
-import { redactSecrets } from '../../../shared/redact'
 import {
   GIT_OUTPUT_MAX_BYTES,
   GIT_TIMEOUT_MS,
@@ -21,9 +16,15 @@ import {
   PLAYBOOK_LINE_HASH_CHARS,
 } from '../../../shared/constants'
 import type { PlaybookLease } from '../../../shared/playbook'
-import { withoutCredentials } from '../../credentialEnvironment'
-import { runTreeSync } from '../../../host/processTree'
 import type { PlaybookHookAdmission } from './outcomes'
+import { processGitPath } from '../../../host/git'
+import { runTreeSync } from '../../../host/processTree'
+import { workspaceChildEnvironment } from '../../execGuard'
+import { createHash, randomUUID } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { UI_TEXT } from '../../../shared/l10n/text'
+import { redactSecrets } from '../../../shared/redact'
+import { withoutCredentials } from '../../credentialEnvironment'
 
 export interface ModuleState {
   module: PlaybookModule
@@ -189,12 +190,16 @@ export function renamedFiles(
   admission: PlaybookHookAdmission,
 ): { from: string; to: string }[] {
   if (!existsSync(nodePath.join(workspace, '.git'))) return []
+  // git resolved outside the workspace (links followed): a `git` planted in
+  // the repository never runs (D24).
+  const git = processGitPath(workspace)
+  if (git === undefined) throw new Error(UI_TEXT.playbookUnavailable)
   const renames: { from: string; to: string }[] = []
   for (const args of [['diff', '--cached'], ['diff'], ['log', '--all', '--format=']]) {
     const effect = {
       kind: 'git' as const,
       cwd: workspace,
-      command: 'git',
+      command: git,
       args: [
         ...args,
         '--no-ext-diff',
@@ -207,10 +212,15 @@ export function renamedFiles(
     }
     if (!admission.admit(effect) || (process.platform === 'win32' && !admission.runContained))
       throw new Error(UI_TEXT.playbookUnavailable)
-    const options: SpawnSyncOptions = {
+    const options = {
       cwd: workspace,
-      env: withoutCredentials(process.env),
-      encoding: 'buffer',
+      // The guarded child PATH for the workspace, so git's own bare-name
+      // helpers never run a planting.
+      env: workspaceChildEnvironment(process.platform, withoutCredentials(process.env), {
+        workspaceRoot: workspace,
+        realpath: realpathSync,
+      }),
+      encoding: 'buffer' as const,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_OUTPUT_MAX_BYTES,
       windowsHide: true,

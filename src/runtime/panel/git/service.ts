@@ -45,9 +45,6 @@
 // - Nothing secret is logged, thrown in clear, or shown: failures carry
 //   git's words to the caller, which redacts them before any cut.
 
-import { spawn } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   fileIdentityKey,
@@ -59,16 +56,12 @@ import {
   statIdentitySync,
   type FileIdentity,
 } from '../../../core/fs/fileIdentity'
-import { withoutCredentials } from '../../../core/credentialEnvironment'
-import { canonicalPath, isMissingPath } from '../../../host/canonicalPath'
-import { createGitProcess, quietGitEnvironment, type GitProcess } from '../../../host/git'
 import {
   commitMessageProblem,
   nativeCommitArgs,
   nativeStageAllArgs,
   type CommitMessageProblem,
 } from '../../../core/git/commit'
-import { nativeDiffArgs, readNativeDiff, type TruncatedDiff } from '../../../core/git/diff'
 import {
   isPlainRefName,
   isPlainRefspec,
@@ -90,7 +83,6 @@ import {
   type NativeGitContext,
   type NativeStatusSnapshot,
 } from '../../../core/git/status'
-import { newFileDiff } from '../../../core/git/gitText'
 import type { RuntimeGitDeps } from '../../../core/git/runtimeGit'
 import {
   GIT_PUSH_CREDENTIAL_VARIABLES,
@@ -110,6 +102,16 @@ import {
   type RepositoryLock,
   type StateSeal,
 } from './transaction'
+import { isWorkspacePath } from '../../../core/execGuard'
+import { createGitProcess, type GitProcess } from '../../../host/git'
+import { quietGitEnvironment } from '../../../core/execGuard'
+import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { spawnGuarded } from '../../../core/guardedChildProcess'
+import { mkdir } from 'node:fs/promises'
+import { withoutCredentials } from '../../../core/credentialEnvironment'
+import { canonicalPath, isMissingPath } from '../../../host/canonicalPath'
+import { nativeDiffArgs, readNativeDiff, type TruncatedDiff } from '../../../core/git/diff'
+import { newFileDiff } from '../../../core/git/gitText'
 
 /** The subcommands the service runs; anything else is refused. */
 const NATIVE_GIT_SUBCOMMANDS = [
@@ -316,10 +318,17 @@ export function nativeWorktreeAddArgs(wtPath: string, commit: string): readonly 
 export function fixedGitLocator(
   platform: NodeJS.Platform,
   executable: string,
+  workspace?: {
+    readonly workspaceRoot: string
+    readonly realpath: (filePath: string) => string
+  },
 ): () => string | undefined {
-  const isAbsolute =
-    platform === 'win32' ? path.win32.isAbsolute(executable) : path.posix.isAbsolute(executable)
-  return () => (isAbsolute ? executable : undefined)
+  const p = platform === 'win32' ? path.win32 : path.posix
+  return () =>
+    !p.isAbsolute(executable) ||
+    (workspace !== undefined && isWorkspacePath(platform, workspace, executable))
+      ? undefined
+      : executable
 }
 
 export class CommitRefusedError extends Error {
@@ -524,9 +533,14 @@ export class NativeGitService {
         platform: process.platform,
         env: process.env,
         fileExists: existsSync,
-        spawn,
-        // The git the host resolved, never another one on PATH.
-        locate: fixedGitLocator(process.platform, deps.gitPath),
+        realpath: realpathSync,
+        spawn: spawnGuarded,
+        // The git the host resolved, never another one on PATH; refused
+        // when it names the bound repository itself.
+        locate: fixedGitLocator(process.platform, deps.gitPath, {
+          workspaceRoot: deps.repositoryRoot,
+          realpath: realpathSync,
+        }),
       })
     // The directory approved now is the one every later operation must
     // find: its identity is taken in this same tick.
@@ -596,7 +610,11 @@ export class NativeGitService {
         cwd: root.path,
         env: isUserEnvironment
           ? nativePushEnvironment(this.deps.userEnvironment())
-          : quietGitEnvironment(process.env),
+          : quietGitEnvironment(process.env, {
+              workspaceRoot: root.path,
+              platform: process.platform,
+              realpath: realpathSync,
+            }),
         timeoutMs: GIT_TIMEOUT_MS,
         signal: guard.signal,
         beforeRun: this.atSpawn(args, root, guard, held),

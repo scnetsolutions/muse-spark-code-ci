@@ -76,8 +76,11 @@ export interface MuseVoiceSetupDeps {
 export function createMuseVoiceSetup(
   probe: Omit<
     CaptureProbe,
-    'fileExists' | 'programFiles' | 'remoteName' | 'appName' | 'pathVariable'
-  >,
+    'fileExists' | 'programFiles' | 'remoteName' | 'appName' | 'pathVariable' | 'realpath'
+  > & {
+    /** Link resolver for the workspace comparison. REQUIRED. */
+    readonly realpath: (filePath: string) => string
+  },
   deps: MuseVoiceSetupDeps,
 ): DictationSetup {
   if (typeof globalThis.WebSocket !== 'function') {
@@ -90,6 +93,7 @@ export function createMuseVoiceSetup(
     remoteName: remoteHostName(),
     appName: env.appName,
     pathVariable: process.env['PATH'],
+    realpath: probe.realpath,
   })
   if (!location.isAvailable) {
     deps.log.info(`Muse Voice unavailable: ${location.reason}`)

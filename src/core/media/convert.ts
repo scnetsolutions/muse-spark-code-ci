@@ -1,11 +1,6 @@
 // Optional machine-local conversion. No installation, shell, credentials,
 // provider calls or user content in diagnostics. Callers own confinement/consent.
-import { type ChildProcess } from 'node:child_process'
-import { spawnResourceProcess } from '../resources/launcher'
-import { Buffer } from 'node:buffer'
-import { watch, type FSWatcher } from 'node:fs'
 import fs, { chmod, lstat, mkdtemp, open, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   HOOK_FORBIDDEN_ENV_NAMES,
@@ -26,7 +21,6 @@ import {
   SHELL_MAX_TIMEOUT_MS,
   UI_TEXT,
 } from '../../shared/constants'
-import { fill } from '../../shared/l10n/text'
 import {
   checkMediaLimits,
   sniffMedia,
@@ -34,6 +28,14 @@ import {
   type MediaLimits,
   type SniffMediaResult,
 } from './limits'
+import { noWorkspaceChildEnvironment, workspaceChildEnvironment } from '../execGuard'
+import { type ChildProcess } from 'node:child_process'
+import { spawnResourceProcess } from '../resources/launcher'
+import { realpathSync } from 'node:fs'
+import { Buffer } from 'node:buffer'
+import { watch, type FSWatcher } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { fill } from '../../shared/l10n/text'
 
 export interface MediaConverter {
   readonly kind: 'ffmpeg' | 'avconvert'
@@ -123,8 +125,9 @@ async function probeVersion(
   args: readonly string[],
   options: VersionProbeOptions,
 ): Promise<string> {
+  // The trust-verified converter probe: absolute entries only, links followed.
   const { child, stop: stopTree } = await spawnResourceProcess('probe', command, args, {
-    env: options.env,
+    env: noWorkspaceChildEnvironment(process.platform, options.env, realpathSync),
     ...(options.signal !== undefined && { signal: options.signal }),
   })
   child.stderr.resume()
@@ -263,9 +266,14 @@ async function runConverter(
     child,
     stop: stopTree,
     pid: payloadPid,
+    // The trust-verified converter runs with the guarded child PATH for its
+    // working directory, so nothing it starts by bare name runs from there.
   } = await spawnResourceProcess('contained', command, args, {
     cwd: options.cwd,
-    env: options.env,
+    env: workspaceChildEnvironment(process.platform, options.env, {
+      workspaceRoot: options.cwd,
+      realpath: realpathSync,
+    }),
     ...(options.signal !== undefined && { signal: options.signal }),
   })
   child.stdin.end()

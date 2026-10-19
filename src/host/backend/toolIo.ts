@@ -8,11 +8,7 @@
 // terminal would give, with credential variables fenced (D89.5) and agent
 // credential routes fenced (D89).
 
-import { fileReadIdentity } from '../../core/fs/fileIdentity'
-import { spawn, type ChildProcess } from 'node:child_process'
-import { createHash } from 'node:crypto'
-import { existsSync, type BigIntStats } from 'node:fs'
-import { type FileHandle, lstat, mkdir, open, rm } from 'node:fs/promises'
+import type { ChildProcess } from 'node:child_process'
 import path from 'node:path'
 import {
   type FileIdentity,
@@ -21,14 +17,6 @@ import {
   sameFile,
   statIdentity,
 } from '../../core/fs/fileIdentity'
-import { StringDecoder } from 'node:string_decoder'
-import { Worker } from 'node:worker_threads'
-import {
-  deleteEnvironmentVariable,
-  environmentValue,
-  setEnvironmentVariable,
-  windowsPowerShellModulePath,
-} from '../../core/backends/musecode/launch'
 import type {
   ReservationStep,
   SearchHit,
@@ -39,14 +27,7 @@ import type {
   ShellTimeLimit,
   ToolIo,
 } from '../../core/backends/modelapi/tools'
-import { contentHash, type ContentSource } from '../../core/schedules/provenance'
-import { refusedShellEntry, unstartedShell } from '../../core/shellResult'
-import { resolveExecutable } from '../../core/executables'
-import { isPdf } from '../../core/pdf'
 import type { ToolImageIo } from '../../core/toolImages'
-import { isSamePath } from '../../core/paths'
-import { isCredentialVariable, withoutCredentials } from '../../core/credentialEnvironment'
-import { powerShellQuoted } from '../../core/shellQuote'
 import {
   BOUNDED_FILE_READ_CHUNK_BYTES,
   CLI_OUTPUT_MAX_BYTES,
@@ -68,18 +49,43 @@ import {
   WINDOWS_POWERSHELL_RELATIVE_PATH,
   WINDOWS_POWERSHELL_UTF8_PREAMBLE,
 } from '../../shared/constants'
+import type { VaultExecService } from '../../core/vault/exec/service'
+import { deleteEnvironmentVariable } from '../../core/backends/musecode/launch'
+import { type ExecutableScope, type GuardedChildEnv } from '../../core/executables'
+import { killTree, type ProcessTreeDeps, type ShellJob, treeSpawnOptions } from '../processTree'
+import { NO_WORKSPACE } from '../../core/executables'
+import {
+  environmentValue,
+  isWorkspacePath,
+  setEnvironmentVariable,
+  shellEnvironment,
+  hookEnvironment,
+  resolveExecutable,
+  workspaceChildEnvironment,
+} from '../../core/execGuard'
+import { fileReadIdentity } from '../../core/fs/fileIdentity'
+import { spawnGuarded } from '../../core/guardedChildProcess'
+import { createHash } from 'node:crypto'
+import { existsSync, realpathSync, type BigIntStats } from 'node:fs'
+import { type FileHandle, lstat, mkdir, open, rm } from 'node:fs/promises'
+import { StringDecoder } from 'node:string_decoder'
+import { Worker } from 'node:worker_threads'
+import { contentHash, type ContentSource } from '../../core/schedules/provenance'
+import { refusedShellEntry, unstartedShell } from '../../core/shellResult'
+import { isPdf } from '../../core/pdf'
+import { isSamePath } from '../../core/paths'
+import { withoutCredentials } from '../../core/credentialEnvironment'
+import { powerShellQuoted } from '../../core/shellQuote'
 import { fill, uiLocale } from '../../shared/l10n/text'
 import { canonicalPath } from '../canonicalPath'
 import { foldersMade, writeFileAtomically, writeFileIfUnchanged } from '../fsAtomic'
-import { killTree, type ProcessTreeDeps, type ShellJob, treeSpawnOptions } from '../processTree'
 import { spawnMcpJob } from './mcpJobLaunch'
 import { joinStatement, newShellJob } from './shellJob'
 import { resourceEnvironment, type ResourceLease } from '../../core/resources/launch'
 import { admitResource, resourceWindowsJob } from '../../core/resources/admission'
 import { observeResourceProcess } from '../resources/resourceAdmission'
 import { holdResourceJob } from '../resources/resourceJobHolder'
-import { vaultFenceEnvironment, type VaultFenceOptions } from '../../core/vault/exec/fence'
-import type { VaultExecService } from '../../core/vault/exec/service'
+import type { VaultFenceOptions } from '../../core/vault/exec/fence'
 
 /** Short window CLI commands share the shell's admission, native tree and bounded teardown. */
 export async function runResourceCommand(
@@ -109,11 +115,18 @@ export async function runResourceCommand(
       stderr: error instanceof Error ? error.message : String(error),
     }
   }
+  // Short-window CLI commands run with the guarded child PATH for their
+  // working directory (the caller's workspace root, or this process's), so
+  // a planted helper there never runs by bare name.
+  const childWorkspaceRoot = cwd ?? process.cwd()
   const result = await runCommand({
     file: invocation.command,
     args: invocation.args,
-    cwd: cwd ?? process.cwd(),
-    env: childEnv,
+    cwd: childWorkspaceRoot,
+    env: workspaceChildEnvironment(process.platform, childEnv, {
+      workspaceRoot: childWorkspaceRoot,
+      realpath: realpathSync,
+    }),
     timeoutMs,
     signal,
     tree: {
@@ -157,6 +170,13 @@ export interface ToolIoDeps {
    * Code's documents give (D27).
    */
   readonly unsavedFiles: () => readonly string[]
+  /**
+   * The workspace shell commands and hooks run in: interpreter lookups
+   * never resolve a file inside it, and child environments carry the
+   * guarded child PATH for it. Absent falls back to each call's own
+   * working directory.
+   */
+  readonly workspaceRoot?: string | undefined
   /** Runtime workspace identity, sampled at mutation and command boundaries. */
   readonly assertWorkspaceCurrent?: (() => void) | undefined
   /** Windows: the job helper's assembly, undefined where jobs are unavailable (M27). */
@@ -226,35 +246,6 @@ const ENOENT = 'ENOENT'
 const BASH = 'bash'
 const POWERSHELL = 'powershell'
 const PATH_VARIABLE = 'PATH'
-const PS_MODULE_PATH = 'PSModulePath'
-const PROGRAM_FILES = 'ProgramFiles'
-const HOOK_ENV_NAMES = [
-  'HOME',
-  'PATH',
-  'USER',
-  'LOGNAME',
-  'TMPDIR',
-  'TEMP',
-  'TMP',
-  'SHELL',
-  'LANG',
-  'LC_ALL',
-  'TERM',
-] as const
-const WINDOWS_HOOK_ENV_NAMES = ['COMSPEC', 'PATHEXT', 'SystemRoot', 'WINDIR'] as const
-
-// The variables VS Code's terminal strips from the extension host's
-// environment before a shell sees it (`sanitizeProcessEnvironment`,
-// microsoft/vscode src/vs/base/common/processes.ts): Electron's switches
-// (`ELECTRON_RUN_AS_NODE` turns a `code` command into plain Node), the
-// window's IPC handles, and the Snap and GDK loader paths.
-const HOST_ONLY_VARIABLES: readonly RegExp[] = [
-  /^ELECTRON_.+$/,
-  /^VSCODE_(?!(?:PORTABLE|SHELL_LOGIN|ENV_REPLACE|ENV_APPEND|ENV_PREPEND)$).+$/,
-  /^SNAP(?:|_.*)$/,
-  /^GDK_PIXBUF_.+$/,
-]
-
 function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === ENOENT
 }
@@ -325,86 +316,25 @@ export function withTerminalOverrides(
   return env
 }
 
-/** The shell tool's environment, without host plumbing or unapproved credentials. */
-export function shellEnvironment(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
-  systemRoot: string | undefined,
-  passNames: readonly string[] = [],
-  isFenced = true,
-  vault: VaultFenceOptions = {},
-): NodeJS.ProcessEnv {
-  const clean: NodeJS.ProcessEnv = {}
-  const entries = Object.entries(withoutCredentials(env, passNames, platform))
-  for (const [key, value] of entries) {
-    if (HOST_ONLY_VARIABLES.every((pattern) => !pattern.test(key))) {
-      clean[key] = value
-    }
-  }
-  if (platform === 'win32' && systemRoot !== undefined) {
-    setEnvironmentVariable(
-      clean,
-      platform,
-      PS_MODULE_PATH,
-      windowsPowerShellModulePath(systemRoot, environmentValue(env, platform, PROGRAM_FILES)),
-    )
-  }
-  return isFenced ? vaultFenceEnvironment(clean, { ...vault, passNames, platform }) : clean
-}
-
-export function hookEnvironment(
-  env: NodeJS.ProcessEnv,
-  platform: NodeJS.Platform,
-  extraNames: readonly string[] = [],
-): NodeJS.ProcessEnv {
-  const clean: NodeJS.ProcessEnv = {}
-  const names: readonly string[] =
-    platform === 'win32'
-      ? [...HOOK_ENV_NAMES, ...WINDOWS_HOOK_ENV_NAMES, ...extraNames]
-      : [...HOOK_ENV_NAMES, ...extraNames]
-  for (const name of names) {
-    if (isCredentialVariable(name)) {
-      continue
-    }
-    const value = environmentValue(env, platform, name)
-    if (value === undefined) {
-      continue
-    }
-    const normalizedName = platform === 'win32' ? name.toUpperCase() : name
-    if (normalizedName === PATH_VARIABLE) {
-      const pathApi = platform === 'win32' ? path.win32 : path.posix
-      const delimiter = pathApi.delimiter
-      setEnvironmentVariable(
-        clean,
-        platform,
-        name,
-        value
-          .split(delimiter)
-          .filter((entry) => pathApi.isAbsolute(entry))
-          .join(delimiter),
-      )
-    } else if (normalizedName !== 'COMSPEC' || path.win32.isAbsolute(value)) {
-      setEnvironmentVariable(clean, platform, name, value)
-    }
-  }
-  return vaultFenceEnvironment(clean, { platform })
-}
-
 /**
  * The interpreter for the shell tool, by absolute path: Windows PowerShell
  * under `%SystemRoot%` (else the first on the absolute PATH), bash from the
- * absolute PATH elsewhere. Undefined when there is none.
+ * absolute PATH elsewhere. With the workspace, entries inside it are never
+ * probed, so a planted `bash` there never resolves. Undefined when there is
+ * none.
  */
 export function shellInterpreter(
   platform: NodeJS.Platform,
   systemRoot: string | undefined,
   env: NodeJS.ProcessEnv,
   isExistingFile: (filePath: string) => boolean,
+  scope: ExecutableScope,
 ): string | undefined {
   const probe = {
     platform,
     pathVariable: environmentValue(env, platform, PATH_VARIABLE),
     fileExists: isExistingFile,
+    scope,
   }
   if (platform === 'win32') {
     return systemRoot === undefined
@@ -440,17 +370,40 @@ export function shellArguments(
   return isFenced ? ['--noprofile', '--norc', '-c', command] : ['-lc', command]
 }
 
-function hookProgramFor(deps: ToolIoDeps, configuredShell: string | undefined): string | undefined {
+/**
+ * The interpreter for hooks, by absolute path: an absolute `SHELL` the
+ * person configured, unless it names a file inside the workspace (a
+ * planting there is never the interpreter); otherwise `sh` resolved
+ * outside the workspace. Undefined when there is none.
+ */
+export function hookProgramFor(
+  deps: ToolIoDeps,
+  configuredShell: string | undefined,
+  scope: ExecutableScope,
+): string | undefined {
   if (deps.platform === 'win32') {
     return deps.systemRoot === undefined
       ? resolveExecutable('cmd', {
           platform: deps.platform,
           pathVariable: deps.env()['PATH'],
           fileExists: existsSync,
+          scope,
         })
       : path.win32.join(deps.systemRoot, 'System32', 'cmd.exe')
   }
-  return configuredShell !== undefined &&
+  // An absolute `SHELL` inside the workspace (for example from
+  // `terminal.integrated.env.*` with `${workspaceFolder}` expanded) is
+  // never the hook interpreter: a planted shell there must not run. It is
+  // ignored and `sh` is resolved outside the workspace instead. With the
+  // explicit no-workspace scope there is no workspace to be inside.
+  const workspace = 'workspaceRoot' in scope ? scope : undefined
+  const isShellInWorkspace =
+    configuredShell !== undefined &&
+    workspace !== undefined &&
+    path.posix.isAbsolute(configuredShell) &&
+    isWorkspacePath(deps.platform, workspace, configuredShell)
+  return !isShellInWorkspace &&
+    configuredShell !== undefined &&
     path.posix.isAbsolute(configuredShell) &&
     existsSync(configuredShell)
     ? configuredShell
@@ -458,6 +411,7 @@ function hookProgramFor(deps: ToolIoDeps, configuredShell: string | undefined): 
         platform: deps.platform,
         pathVariable: deps.env()['PATH'],
         fileExists: existsSync,
+        scope,
       })
 }
 
@@ -626,11 +580,30 @@ export function toolImagePreviewIo(
 }
 
 export function createToolIo(deps: ToolIoDeps): ToolIo {
-  const interpreter = shellInterpreter(deps.platform, deps.systemRoot, deps.env(), existsSync)
+  // Shells and hooks run with the workspace as their working directory, so
+  // their interpreters are resolved outside it (resolved through links).
+  // With no folder open the explicit no-workspace scope applies: absolute
+  // entries only, links followed.
+  const lookupWorkspace: ExecutableScope =
+    deps.workspaceRoot === undefined
+      ? { noWorkspace: NO_WORKSPACE, realpath: realpathSync }
+      : { workspaceRoot: deps.workspaceRoot, realpath: realpathSync }
+  const interpreter = shellInterpreter(
+    deps.platform,
+    deps.systemRoot,
+    deps.env(),
+    existsSync,
+    lookupWorkspace,
+  )
   const hasUnsavedChanges = (absolutePath: string) =>
     deps.unsavedFiles().some((open) => isSamePath(open, absolutePath, deps.platform))
   const configuredHookShell = deps.env()['SHELL']
-  const hookProgram = hookProgramFor(deps, configuredHookShell)
+  const hookProgram = hookProgramFor(deps, configuredHookShell, lookupWorkspace)
+  // Each call's child environment is guarded for the workspace it runs in.
+  const workspaceFor = (cwd: string): { workspaceRoot: string; realpath: typeof realpathSync } => ({
+    workspaceRoot: deps.workspaceRoot ?? cwd,
+    realpath: realpathSync,
+  })
   const prepareResourceJob = async (
     resource: ResourceLease | undefined,
     job: ShellJob | undefined,
@@ -998,6 +971,7 @@ export function createToolIo(deps: ToolIoDeps): ToolIo {
           isInteractive ? (deps.passEnvironmentVariables?.() ?? []) : [],
           isFenced,
           deps.vaultFence?.(),
+          workspaceFor(cwd),
         ),
         timeoutMs,
         signal,
@@ -1086,7 +1060,7 @@ export function createToolIo(deps: ToolIoDeps): ToolIo {
           file,
           args,
           cwd,
-          env: hookEnvironment(deps.env(), deps.platform, extraEnvNames),
+          env: hookEnvironment(deps.env(), deps.platform, extraEnvNames, workspaceFor(cwd)),
           timeoutMs,
           signal,
           tree: { platform: deps.platform, systemRoot: deps.systemRoot, log: deps.log },
@@ -1156,7 +1130,11 @@ export interface CommandRun {
   readonly file: string
   readonly args: readonly string[]
   readonly cwd: string
-  readonly env: NodeJS.ProcessEnv
+  /**
+   * The child's whole environment: the guarded shell/hook environment for
+   * `cwd`, so a raw environment does not type-check here.
+   */
+  readonly env: GuardedChildEnv
   readonly timeoutMs: number
   readonly signal: AbortSignal | undefined
   /** Lifts the timeout while the command runs (M46: moved to the background). */
@@ -1185,7 +1163,7 @@ function startProcess(run: CommandRun) {
     // nosemgrep: javascript.lang.security.detect-child-process.detect-child-process -- the command line is the payload by design: the user approved it on a card, and it runs through the interpreter as an argument array, never a shell string (PLAN.md §8)
     const child =
       run.nativeJob === undefined
-        ? spawn(run.file, [...run.args], {
+        ? spawnGuarded(run.file, [...run.args], {
             cwd: run.cwd,
             env: resourceEnvironment(run.env, run.resource),
             windowsHide: true,

@@ -298,8 +298,11 @@ function gitTerminalOpener(
  */
 function nativeGitDeps(deps: GitWindowDeps, window: GitWindow): RuntimeGitDeps | undefined {
   const root = deps.workspaceRoot
-  const gitPath = processGitPath()
-  if (root === undefined || gitPath === undefined) {
+  if (root === undefined) {
+    return undefined
+  }
+  const gitPath = processGitPath(root)
+  if (gitPath === undefined) {
     return undefined
   }
   const userEnvironment = withoutCredentials(process.env, GIT_PUSH_CREDENTIAL_VARIABLES)

@@ -1,31 +1,34 @@
-import { createHash } from 'node:crypto'
-import { type SpawnSyncOptions, type SpawnSyncReturns } from 'node:child_process'
 import {
   existsSync,
   lstatSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   writeFileSync,
   rmSync,
 } from 'node:fs'
-import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
   GIT_OUTPUT_MAX_BYTES,
   GIT_TIMEOUT_MS,
   PLAYBOOK_HOOK_NAMES,
 } from '../../../shared/constants'
-import { UI_TEXT } from '../../../shared/l10n/text'
 import {
   playbookConfigSnapshotSchema,
   type PlaybookConfigSnapshot,
   type PlaybookRecord,
   type PlaybookPushRange,
 } from '../../../shared/playbook'
+import { processGitPath } from '../../../host/git'
+import { workspaceChildEnvironment } from '../../execGuard'
+import { runTreeSync } from '../../../host/processTree'
+import { createHash } from 'node:crypto'
+import { type SpawnSyncOptions, type SpawnSyncReturns } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { UI_TEXT } from '../../../shared/l10n/text'
 import { redactSecrets } from '../../../shared/redact'
 import { withoutCredentials } from '../../credentialEnvironment'
-import { runTreeSync } from '../../../host/processTree'
 
 /** Tagged effects go through the harness's ordinary tool policy. Hooks receive
  * their real arguments/stdin, never an altered script or a substitute command. */
@@ -82,14 +85,45 @@ export class PlaybookOutcomes {
     private readonly admission: PlaybookHookAdmission,
   ) {}
 
+  /**
+   * git resolved outside the workspace (links followed): a `git` planted in
+   * the repository never runs (D24). Every effect spawns this command, so
+   * the admission sees the absolute path it approves.
+   */
+  private gitCommand(): string {
+    const git = processGitPath(this.workspace)
+    if (git === undefined) throw new Error(UI_TEXT.playbookUnavailable)
+    return git
+  }
+
+  private effect(
+    kind: PlaybookHookEffect['kind'],
+    cwd: string,
+    args: readonly string[],
+  ): PlaybookHookEffect {
+    return { kind, cwd, command: this.gitCommand(), args }
+  }
+
   private bytes(effect: PlaybookHookEffect, isMissingAllowed = false): Buffer {
     if (!this.admission.admit(effect)) throw new Error(UI_TEXT.playbookUnavailable)
+    const scrubbed = Object.fromEntries(
+      Object.entries(withoutCredentials(process.env)).filter(
+        ([name]) => !/^(?:GIT_.*|HUSKY|HUSKY_SKIP_HOOKS)$/iu.test(name),
+      ),
+    )
     const options = {
       cwd: effect.cwd,
-      env: Object.fromEntries(
-        Object.entries(withoutCredentials(process.env)).filter(
-          ([name]) => !/^(?:GIT_.*|HUSKY|HUSKY_SKIP_HOOKS)$/iu.test(name),
-        ),
+      // The child runs with the effect's working directory, which for a
+      // linked worktree is a checkout outside the main workspace: the
+      // guarded child PATH excludes both, so git's own bare-name helpers
+      // (`ssh`, `git-remote-https`) never run a planting from either.
+      env: workspaceChildEnvironment(
+        process.platform,
+        workspaceChildEnvironment(process.platform, scrubbed, {
+          workspaceRoot: this.workspace,
+          realpath: realpathSync,
+        }),
+        { workspaceRoot: effect.cwd, realpath: realpathSync },
       ),
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: GIT_OUTPUT_MAX_BYTES,
@@ -130,7 +164,7 @@ export class PlaybookOutcomes {
   }
 
   private git(args: readonly string[], cwd = this.workspace): string {
-    return this.run({ kind: 'git', cwd, command: 'git', args }).trimEnd()
+    return this.run(this.effect('git', cwd, args)).trimEnd()
   }
 
   reachable(refs: readonly string[]): string[] {
@@ -139,12 +173,7 @@ export class PlaybookOutcomes {
     const tips = refs
       .map((ref) =>
         this.run(
-          {
-            kind: 'git',
-            cwd: this.workspace,
-            command: 'git',
-            args: ['rev-parse', '--verify', '--quiet', ref],
-          },
+          this.effect('git', this.workspace, ['rev-parse', '--verify', '--quiet', ref]),
           true,
         ).trimEnd(),
       )
@@ -216,12 +245,7 @@ export class PlaybookOutcomes {
   configSnapshot(): PlaybookConfigSnapshot {
     const hookDir = this.git(['rev-parse', '--path-format=absolute', '--git-path', 'hooks'])
     const hooksPath = this.run(
-      {
-        kind: 'git',
-        cwd: this.workspace,
-        command: 'git',
-        args: ['config', '--get', '--show-origin', 'core.hooksPath'],
-      },
+      this.effect('git', this.workspace, ['config', '--get', '--show-origin', 'core.hooksPath']),
       true,
     ).trimEnd()
     const files: string[] = []
@@ -246,12 +270,7 @@ export class PlaybookOutcomes {
   digest(range?: PlaybookPushRange): string {
     const hookDir = this.git(['rev-parse', '--path-format=absolute', '--git-path', 'hooks'])
     const config = this.run(
-      {
-        kind: 'git',
-        cwd: this.workspace,
-        command: 'git',
-        args: ['config', '--get', '--show-origin', 'core.hooksPath'],
-      },
+      this.effect('git', this.workspace, ['config', '--get', '--show-origin', 'core.hooksPath']),
       true,
     ).trimEnd()
     this.hookFolder = hookDir
@@ -297,12 +316,7 @@ export class PlaybookOutcomes {
     let isAddAttempted = false
     let rootRef: string | undefined
     try {
-      const object = this.bytes({
-        kind: 'git',
-        cwd: this.workspace,
-        command: 'git',
-        args: ['cat-file', 'commit', commit],
-      })
+      const object = this.bytes(this.effect('git', this.workspace, ['cat-file', 'commit', commit]))
       const separator = object.indexOf('\n\n')
       if (separator === -1) throw new Error(UI_TEXT.playbookUnavailable)
       const headers = object.subarray(0, separator).toString('utf8').split('\n')
@@ -339,11 +353,8 @@ export class PlaybookOutcomes {
             : undefined
         const stdinFile = path.join(directory, 'push-range')
         if (input !== undefined) writeFileSync(stdinFile, input)
-        output += this.run({
-          kind: 'hook',
-          cwd: isolated,
-          command: 'git',
-          args: [
+        output += this.run(
+          this.effect('hook', isolated, [
             '-c',
             `core.hooksPath=${hooks}`,
             'hook',
@@ -353,16 +364,11 @@ export class PlaybookOutcomes {
             hook,
             '--',
             ...args,
-          ],
-        })
+          ]),
+        )
       }
       const head = this.run(
-        {
-          kind: 'git',
-          cwd: isolated,
-          command: 'git',
-          args: ['rev-parse', '--verify', '--quiet', 'HEAD'],
-        },
+        this.effect('git', isolated, ['rev-parse', '--verify', '--quiet', 'HEAD']),
         true,
       ).trimEnd()
       if (head !== (range ? commit : (parent ?? ''))) throw new Error(UI_TEXT.playbookUnavailable)

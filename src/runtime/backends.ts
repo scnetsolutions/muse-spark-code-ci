@@ -1,8 +1,5 @@
-import { resolveExecOutputCap } from './exec/runLedger'
 import type { ModelPolicy } from '../core/backends/modelapi/modelPolicy'
 import type * as RuntimeAccountingEntry from './runtimeAccountingEntry'
-import { Usd } from '../shared/usd'
-import { loadLegalScanner } from './legal/legalScanner'
 import type { ProviderClient } from '../core/backends/modelapi/client'
 import type { runtimeSubscriptionClient } from './chatGptProviderCommands'
 import type * as ConfiguredProvidersEntry from '../host/backend/configuredProvidersEntry'
@@ -19,45 +16,13 @@ import type * as ConfiguredProvidersEntry from '../host/backend/configuredProvid
 // and nothing here sees an editor's unsaved buffers until file access goes
 // through the client (M63c).
 
-import { randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
 import path from 'node:path'
 import type { AcpBackend, BackendReadiness } from '../acp/agent'
-import { accountErrorText, isInvalidProvidersFileError } from '../acp/accountText'
-import { AcpPaidUse, type HeadlessPaidPolicy } from '../acp/paid'
 import type { AgentHost } from '../core/agent/agentBackend'
 import type { CliSignIn } from '../core/backends/musecode/credentialFile'
-import {
-  buildChildEnvironment,
-  environmentValue,
-  withLoopbackBypass,
-} from '../core/backends/musecode/launch'
-import { personalSkillsRoot } from '../core/context/skills'
-import { personalAgentsRoot } from '../core/context/customAgents'
-import { memoryDataRoot } from '../core/memory/memoryLocation'
-import { MemoryStore } from '../core/memory/memoryStore'
-import { WorkspaceEdits } from '../core/verify/workspaceEdits'
-import { redactSecrets } from '../core/redact'
-import { recordPaidUse } from '../core/paid/paidFeatures'
 import type { UsageRecording } from '../core/usage/recording'
 import type { UsageBudgetRead } from '../core/usage/usageService'
-import { fileContextIo } from '../host/backend/contextIo'
-import { describeEnvironment } from '../host/backend/environment'
-import { createFileSessionStore } from '../host/backend/fileSessionStore'
-import { jobSourceReader } from '../host/backend/jobSource'
-import { createMemoryIo, systemPath } from '../host/backend/memoryIo'
-import { ModelApiBackendManager } from '../host/backend/modelApiBackendManager'
-import { MuseCodeBackendManager, type ProxySettings } from '../host/backend/museCodeBackendManager'
-import { shellJobAssembly } from '../host/backend/shellJob'
-import { createToolIo } from '../host/backend/toolIo'
-import { AccountHosts, connectAccountSession } from '../host/auth/accountHost'
-import { CliAccount, isCliSignedIn } from '../host/auth/cliAccount'
-import { CredentialStore, type SecretStore } from '../host/auth/credentialStore'
 import type { Logger } from '../host/logger'
-import { createWorkspaceFileLister } from '../host/mention/workspaceFiles'
-import { pageConverter } from '../host/web/pageConverter'
-import { createWebFetcher } from '../host/web/webFetcher'
-import { captureWorkspaceIdentity } from '../host/workspaceIdentity'
 import {
   FILE_REFUSAL_MODEL_TEXT,
   MENTION_INDEX_LIMIT,
@@ -73,7 +38,6 @@ import {
   SETTING_DEFAULTS,
   UI_TEXT,
 } from '../shared/constants'
-import { fill, uiLocale } from '../shared/l10n/text'
 import type { ServeOptions } from './cliArgs'
 import {
   agentDataFolder,
@@ -86,10 +50,44 @@ import {
   withoutCredentials,
   withoutKeyringRoutes,
 } from './credentialVariables'
-import { walkFiles } from './fileWalk'
-import { paidGrantFile } from './paidGrants'
 
 import type { AssembledProviderRun } from './exec/providerExec'
+import { type GuardedChildEnv, NO_WORKSPACE } from '../core/executables'
+import { withLoopbackBypass } from '../core/backends/musecode/launch'
+import { buildChildEnvironment, environmentValue } from '../core/execGuard'
+import { createToolIo } from '../host/backend/toolIo'
+import { resolveExecOutputCap } from './exec/runLedger'
+import { Usd } from '../shared/usd'
+import { loadLegalScanner } from './legal/legalScanner'
+import { randomUUID } from 'node:crypto'
+import { existsSync, realpathSync } from 'node:fs'
+import { accountErrorText, isInvalidProvidersFileError } from '../acp/accountText'
+import { AcpPaidUse, type HeadlessPaidPolicy } from '../acp/paid'
+import { personalSkillsRoot } from '../core/context/skills'
+import { personalAgentsRoot } from '../core/context/customAgents'
+import { memoryDataRoot } from '../core/memory/memoryLocation'
+import { MemoryStore } from '../core/memory/memoryStore'
+import { WorkspaceEdits } from '../core/verify/workspaceEdits'
+import { redactSecrets } from '../core/redact'
+import { recordPaidUse } from '../core/paid/paidFeatures'
+import { fileContextIo } from '../host/backend/contextIo'
+import { describeEnvironment } from '../host/backend/environment'
+import { createFileSessionStore } from '../host/backend/fileSessionStore'
+import { jobSourceReader } from '../host/backend/jobSource'
+import { createMemoryIo, systemPath } from '../host/backend/memoryIo'
+import { ModelApiBackendManager } from '../host/backend/modelApiBackendManager'
+import { MuseCodeBackendManager, type ProxySettings } from '../host/backend/museCodeBackendManager'
+import { shellJobAssembly } from '../host/backend/shellJob'
+import { AccountHosts, connectAccountSession } from '../host/auth/accountHost'
+import { CliAccount, isCliSignedIn } from '../host/auth/cliAccount'
+import { CredentialStore, type SecretStore } from '../host/auth/credentialStore'
+import { createWorkspaceFileLister } from '../host/mention/workspaceFiles'
+import { pageConverter } from '../host/web/pageConverter'
+import { createWebFetcher } from '../host/web/webFetcher'
+import { captureWorkspaceIdentity } from '../host/workspaceIdentity'
+import { fill, uiLocale } from '../shared/l10n/text'
+import { walkFiles } from './fileWalk'
+import { paidGrantFile } from './paidGrants'
 
 export interface ExecRuntimeOptions {
   readonly outputCap?: (policy: ModelPolicy) => number
@@ -161,7 +159,7 @@ function museCodeManager(deps: RuntimeBackendDeps, workspaceRoot: string | undef
   // VS Code inherits its host environment (D1); the standalone runtime has
   // a stricter boundary, shared by serve, account hosts and login.
   const Manager = class extends MuseCodeBackendManager {
-    public override childEnvironment(): NodeJS.ProcessEnv {
+    public override childEnvironment(): GuardedChildEnv {
       const env = museCodeEnvironment(deps.env)
       return withLoopbackBypass(
         buildChildEnvironment({
@@ -170,6 +168,10 @@ function museCodeManager(deps: RuntimeBackendDeps, workspaceRoot: string | undef
           extraVariables: [],
           systemRoot: environmentValue(env, deps.platform, 'SystemRoot'),
           programFiles: environmentValue(env, deps.platform, 'ProgramFiles'),
+          scope:
+            workspaceRoot === undefined
+              ? { noWorkspace: NO_WORKSPACE, realpath: realpathSync }
+              : { workspaceRoot, realpath: realpathSync },
         }),
         deps.platform,
       )
@@ -275,6 +277,9 @@ function modelApiManager(
   const io = createToolIo({
     platform,
     listFiles,
+    // The interpreter lookup excludes this workspace, so a planted `bash`
+    // there never becomes the shell that runs.
+    workspaceRoot,
     systemRoot,
     // No credential variable reaches a tool's process (AGENTS.md rule 8).
     env: () => withoutKeyringRoutes(withoutCredentials(deps.env)),
@@ -552,7 +557,13 @@ function modelApiManager(
 
 /** The backend `--backend` names, its managers created per folder on first use. */
 export function createRuntimeBackend(deps: RuntimeBackendDeps): RuntimeBackend {
-  const museCode = museCodeManager(deps, undefined)
+  // The shared manager serves `login` and the account host, whose children
+  // keep this process's working directory: it is the directory they run in,
+  // so the PATH guard and the CLI lookup treat it as their workspace —
+  // otherwise a project directory they start from is still searched
+  // (docs/certification/pathguard.md).
+  const launchDirectory = process.cwd()
+  const museCode = museCodeManager(deps, launchDirectory)
   const museCodeHosts = new Map<string, MuseCodeBackendManager>()
   const modelApiHosts = new Map<
     string,
@@ -587,7 +598,7 @@ export function createRuntimeBackend(deps: RuntimeBackendDeps): RuntimeBackend {
   // Muse Code's account methods on a short-lived host of their own, as the
   // panel asks them (PR #49): `account/read` when the file cannot say.
   const accountHosts = new AccountHosts(
-    (signal) => connectAccountSession(museCode, deps.version, deps.log, undefined, signal),
+    (signal) => connectAccountSession(museCode, deps.version, deps.log, launchDirectory, signal),
     deps.log,
   )
   const cliAccount = new CliAccount({

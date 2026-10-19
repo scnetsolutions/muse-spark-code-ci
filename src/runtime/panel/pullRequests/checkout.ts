@@ -26,16 +26,8 @@
 // is still trusted, that Cancel was not pressed, and that the record is
 // still exactly this checkout's reservation (its fence).
 
-import {
-  execFile,
-  spawn,
-  type ChildProcess,
-  type ChildProcessWithoutNullStreams,
-} from 'node:child_process'
-import { Buffer } from 'node:buffer'
-import { randomUUID } from 'node:crypto'
+import type { ChildProcess, ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { BigIntStats } from 'node:fs'
-import { mkdir, rename, rm, rmdir } from 'node:fs/promises'
 import path from 'node:path'
 import {
   GIT_BATCH_KILL_GRACE_MS,
@@ -53,24 +45,17 @@ import {
   UNTRUSTED_CHECKOUT_MIN_GIT_MINOR,
   WORKTREE_RECORD_SAVE_ATTEMPTS,
 } from '../../../shared/constants'
-import { fill, formatBytes } from '../../../shared/l10n/text'
-import { GitHubClient, isCommitSha, type PullRequest } from '../../../core/git/github'
-import { repositoryLabel } from '../../../core/git/githubRemote'
 import {
   BlobAnswers,
   heldDestination,
   namedHookOverrides,
   pullRequestCheckoutConfirmation,
 } from '../../../core/git/heldCheckoutCore'
-import { heldTree, type HeldEntry, unsafePathReason } from '../../../core/git/heldTree'
 import {
   pullRequestRefFrom,
   remoteForPullRequest,
   type GitHubRemote,
 } from '../../../core/git/pullRequestRef'
-import { isPlainRefName } from '../../../core/git/pushPlan'
-import { isSamePath } from '../../../core/paths'
-import { withoutCredentials } from '../../../core/credentialEnvironment'
 import {
   fileIdentityKey,
   identityOf,
@@ -79,25 +64,18 @@ import {
   statIdentity,
   type FileIdentity,
 } from '../../../core/fs/fileIdentity'
-import { currentProcessOwner, isProcessOwnerGone } from '../../../core/locks/processOwner'
-import { heldWorktreeFolder, type WorktreeRecord } from '../../../core/worktreeConversations'
 import {
   worktreeAddDetachedArgs,
   worktreeAddHeldArgs,
   worktreeFolder,
   worktreeRemoveArgs,
 } from '../../../core/worktrees'
-import { canonicalPath } from '../../../host/canonicalPath'
-import { hasGitProgramControls } from '../../../host/git'
-import { createFileExclusively } from '../../../host/fsAtomic'
 import type { CoreLogger } from '../../../core/logging'
-import { redactSecrets } from '../../../core/redact'
 import {
   didDropRejectedCredential,
   resolveGitHubCredential,
   type GitHubCredential,
 } from '../../../core/git/tokenSource'
-import { PullRequestServiceError, type RuntimePullRequestDeps } from './pullRequests'
 import {
   holdForRoots,
   isReservationOf,
@@ -109,6 +87,27 @@ import {
   type TrustTicket,
   type WorktreeRecordStore,
 } from './records'
+import { type GuardedChildEnv } from '../../../core/executables'
+import { workspaceChildEnvironment } from '../../../core/execGuard'
+import { hasGitProgramControls } from '../../../host/git'
+import { realpathSync } from 'node:fs'
+import { execFileGuarded, spawnGuarded } from '../../../core/guardedChildProcess'
+import { Buffer } from 'node:buffer'
+import { randomUUID } from 'node:crypto'
+import { mkdir, rename, rm, rmdir } from 'node:fs/promises'
+import { fill, formatBytes } from '../../../shared/l10n/text'
+import { GitHubClient, isCommitSha, type PullRequest } from '../../../core/git/github'
+import { repositoryLabel } from '../../../core/git/githubRemote'
+import { heldTree, type HeldEntry, unsafePathReason } from '../../../core/git/heldTree'
+import { isPlainRefName } from '../../../core/git/pushPlan'
+import { isSamePath } from '../../../core/paths'
+import { withoutCredentials } from '../../../core/credentialEnvironment'
+import { currentProcessOwner, isProcessOwnerGone } from '../../../core/locks/processOwner'
+import { heldWorktreeFolder, type WorktreeRecord } from '../../../core/worktreeConversations'
+import { canonicalPath } from '../../../host/canonicalPath'
+import { createFileExclusively } from '../../../host/fsAtomic'
+import { redactSecrets } from '../../../core/redact'
+import { PullRequestServiceError, type RuntimePullRequestDeps } from './pullRequests'
 
 const COMMIT_PEEL = '^{commit}'
 // A folder made under a private name beside its place, and one moved
@@ -237,7 +236,11 @@ export interface PullRequestCheckoutGit {
 /** How git runs to completion: options for one process. */
 export interface GitRunOptions {
   readonly cwd: string
-  readonly env: NodeJS.ProcessEnv
+  /**
+   * The guarded child environment for `cwd`: the port takes nothing else,
+   * so a raw environment does not type-check here.
+   */
+  readonly env: GuardedChildEnv
   readonly signal: AbortSignal
   readonly timeout: number
   readonly maxBuffer: number
@@ -246,7 +249,8 @@ export interface GitRunOptions {
 /** How the batch child starts. */
 export interface GitStartOptions {
   readonly cwd: string
-  readonly env: NodeJS.ProcessEnv
+  /** The guarded child environment for `cwd`, as above. */
+  readonly env: GuardedChildEnv
   readonly signal: AbortSignal
   readonly timeout: number
   /** Its own process group on POSIX. */
@@ -272,7 +276,7 @@ export interface GitProcessPort {
 export const nodeGitProcesses: GitProcessPort = {
   run: (file, args, options) =>
     new Promise<string>((resolve, reject) => {
-      execFile(file, [...args], { ...options, windowsHide: true }, (error, stdout) => {
+      execFileGuarded(file, [...args], { ...options, windowsHide: true }, (error, stdout) => {
         if (error === null) {
           resolve(stdout)
           return
@@ -280,7 +284,7 @@ export const nodeGitProcesses: GitProcessPort = {
         reject(error instanceof Error ? error : new PullRequestServiceError(failureText(error)))
       })
     }),
-  start: (file, args, options) => spawn(file, [...args], { ...options, windowsHide: true }),
+  start: (file, args, options) => spawnGuarded(file, [...args], { ...options, windowsHide: true }),
 }
 
 export interface NodePullRequestCheckoutGitOptions {
@@ -347,6 +351,19 @@ interface RunHow {
  * in one synchronous turn. With `startGitBatch`, the only way this module
  * starts git.
  */
+/**
+ * The child's environment for a git run in `cwd`: the guarded child PATH
+ * for that directory, so a helper git starts by bare name never runs from
+ * a planting in the checkout.
+ */
+function checkoutChildEnvironment(
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): GuardedChildEnv {
+  return workspaceChildEnvironment(platform, env, { workspaceRoot: cwd, realpath: realpathSync })
+}
+
 function runGit(
   git: NodeGitRunner,
   gate: GitGate,
@@ -357,7 +374,7 @@ function runGit(
   gate()
   return git.processes.run(git.gitPath, args, {
     cwd,
-    env: how.env ?? git.quietEnv,
+    env: checkoutChildEnvironment(git.platform, how.env ?? git.quietEnv, cwd),
     signal: how.signal ?? git.signal,
     timeout: GIT_WORKTREE_TIMEOUT_MS,
     maxBuffer: GIT_OUTPUT_MAX_BYTES,
@@ -374,7 +391,7 @@ function startGitBatch(
   gate()
   return git.processes.start(git.gitPath, args, {
     cwd,
-    env: git.quietEnv,
+    env: checkoutChildEnvironment(git.platform, git.quietEnv, cwd),
     signal: git.signal,
     timeout: GIT_WORKTREE_TIMEOUT_MS,
     // Its own group on POSIX, so the deadline stops the helpers it
