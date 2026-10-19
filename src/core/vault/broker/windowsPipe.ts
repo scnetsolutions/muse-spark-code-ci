@@ -8,7 +8,7 @@
 
 import * as z from 'zod/mini'
 import { VAULT_LIMITS } from '../../../shared/constants'
-import { type VaultSecuredListenerPort } from './channel'
+import { type VaultSecuredListenerPort } from './ports'
 import { type WindowsVaultPipePort } from './peer'
 import { type VaultFileSecurityPort } from '../store'
 import { type VaultPrivateFilesPort } from './files'
@@ -17,6 +17,9 @@ import { type VaultPrivateFilesPort } from './files'
 export const WINDOWS_VAULT_PIPE_RELAY_VERSION = 1
 /** Header: type (1 byte), connection id (uint32 BE), payload length (uint32 BE). */
 export const WINDOWS_VAULT_PIPE_HEADER_BYTES = 9
+/** Byte offsets of the connection id and payload length inside the header. */
+export const WINDOWS_VAULT_PIPE_ID_OFFSET = 1
+export const WINDOWS_VAULT_PIPE_LENGTH_OFFSET = 5
 /** At most this many connections are open at once; the helper refuses more. */
 export const WINDOWS_VAULT_PIPE_MAX_CONNECTIONS = 64
 /** One relay frame's payload never exceeds the broker's frame limit. */
@@ -38,6 +41,8 @@ export const WINDOWS_VAULT_PIPE_FRAME = {
   fileResult: 0x06,
   /** Result of a server check; payload windowsVaultPipeServerResultSchema. */
   serverResult: 0x07,
+  /** Result of a process check; payload windowsVaultPipeProcessResultSchema. */
+  processResult: 0x08,
   /** Bytes to the client. */
   send: 0x13,
   /** Disconnect the client (DisconnectNamedPipe, CloseHandle). */
@@ -46,6 +51,8 @@ export const WINDOWS_VAULT_PIPE_FRAME = {
   file: 0x21,
   /** Identify a pipe's server natively (`files` mode); payload windowsVaultPipeServerQuerySchema. */
   server: 0x22,
+  /** Identify any process natively (`files` mode); payload windowsVaultPipeProcessQuerySchema. */
+  process: 0x23,
 } as const
 
 const sid = z.string().check(z.regex(/^S-1-[0-9]+(-[0-9]+){1,14}$/u))
@@ -115,14 +122,46 @@ export const windowsVaultPipeServerResultSchema = z.strictObject({
   server: z.nullable(windowsVaultPipeClientSchema),
 })
 
+const vaultPipeProcessSchema = z.strictObject({
+  processId: counter.check(z.positive()),
+  userId: sid,
+  startedAt: counter,
+  executable: absoluteWindowsPath,
+})
+
+/** Identify any process natively, for broker discovery liveness (VAULTPARITY). */
+export const windowsVaultPipeProcessQuerySchema = z.strictObject({
+  v: z.literal(WINDOWS_VAULT_PIPE_RELAY_VERSION),
+  id: counter,
+  processId: counter.check(z.positive()),
+})
+export const windowsVaultPipeProcessResultSchema = z.strictObject({
+  v: z.literal(WINDOWS_VAULT_PIPE_RELAY_VERSION),
+  id: counter,
+  result: z.enum(['ok', 'refused', 'missing']),
+  /** The helper's own token user: the process must equal it. */
+  ownerSid: sid,
+  /** Read from the OS for the process; null unless `ok`. */
+  process: z.nullable(vaultPipeProcessSchema),
+})
+export type WindowsVaultPipeProcess = z.infer<typeof vaultPipeProcessSchema>
+
 /**
- * The host side of a Windows connection (lane C-M109-1c): the broker's pipe
- * server, identified natively, must be this user's broker from the lock.
- * The verifier refuses unless `server.userId === ownerSid`, `remote` is
- * false, and the process id and start time equal the lock's.
+ * The host side of a Windows connection (lane C-M109-1c): the pipe server,
+ * identified natively, must be this user's helper. The verifier refuses
+ * unless `server.userId === ownerSid`, `remote` is false and the DACL is
+ * owner-only; the broker itself is bound by the claim file and the hello.
  */
 export interface WindowsVaultPipeServerCheck {
   inspectServer(pipe: string): Promise<z.infer<typeof windowsVaultPipeServerResultSchema>>
+}
+
+/**
+ * The `files` helper's native read of any process (VAULTPARITY): broker
+ * discovery liveness on Windows, where no POSIX peer binary exists.
+ */
+export interface WindowsVaultPipeProcessCheck {
+  inspectProcess(processId: number): Promise<z.infer<typeof windowsVaultPipeProcessResultSchema>>
 }
 
 /**
@@ -140,19 +179,19 @@ export interface WindowsVaultPipeHelper extends VaultSecuredListenerPort, Window
 
 /**
  * The host's decision on a server check (RVCM1091A F9): the pipe's server is
- * this user's broker only when every field the OS reported matches.
+ * this user's helper only when every field the OS reported matches. The
+ * lock's process is the broker node, never the pipe-owning helper, so the
+ * server binds by owner SID here (the claim file binds the pipe name, and
+ * the hello binds the broker); staleness still reads the broker node.
  */
-export function isVaultPipeServerTrusted(
-  answer: unknown,
-  lock: { readonly processId: number; readonly startedAt: number },
-): boolean {
+export function isVaultPipeServerTrusted(answer: unknown, ownerSid: string): boolean {
   const parsed = windowsVaultPipeServerResultSchema.safeParse(answer)
   if (!parsed.success || parsed.data.result !== 'ok' || parsed.data.server === null) return false
   const server = parsed.data.server
   return (
+    server.userId === ownerSid &&
     server.userId === parsed.data.ownerSid &&
     !server.remote &&
-    server.processId === lock.processId &&
-    server.startedAt === lock.startedAt
+    server.ownerOnlyDacl
   )
 }

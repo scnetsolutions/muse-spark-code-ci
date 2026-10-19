@@ -14,17 +14,32 @@ import { VaultManagement } from '../../core/vault/broker/management'
 import {
   VaultStoreRepository,
   VaultSlotUnlock,
+  type VaultAnchorPort,
   type VaultSlotProvider,
 } from '../../core/vault/broker/repository'
+import type { VaultBrokerLocation } from '../../core/vault/broker/discovery'
+import type { VaultSlotRecord } from '../../shared/vault'
 import { VaultLockEpoch } from '../../core/vault/broker/epoch'
 import { UnixVaultPrivateFiles, type VaultPrivateFilesPort } from '../../core/vault/broker/files'
 import { UnixVaultPeerVerifier, type VaultPeerVerifier } from '../../core/vault/broker/peer'
-import { type VaultBrokerDeps } from '../../core/vault/broker/ports'
+import { type VaultBrokerDeps, type VaultSecuredListenerPort } from '../../core/vault/broker/ports'
 import { NodeVaultFiles } from '../../core/vault/store'
 import { KeyringVaultAnchor } from './keyringAnchor'
 import { type KeyringEntryFactory } from '../keyStore'
-import { PosixVaultSlots } from './slots/posixVaultSlots'
+import { LinuxVaultSlots } from './slots/linuxVaultSlots'
+import { MacVaultSlots } from './slots/macVaultSlots'
+import { WindowsVaultSlots } from './slots/windowsVaultSlots'
+import { macVaultTransport } from './slots/macVaultTransport'
+import { macVaultSlotExecutable } from './posixNative'
 import { startVaultBrokerProcess } from './brokerProcess'
+import {
+  startWindowsVaultBrokerOnServe,
+  startWindowsVaultBrokerProcess,
+  type WindowsVaultBrokerServe,
+} from './windowsBrokerProcess'
+import { WindowsPipeFiles, startWindowsPipeServe, windowsVaultPipeName } from './windowsPipeRelay'
+import { windowsBrokerPlatform, type WindowsBrokerPlatform } from './windowsHost'
+import { VaultError } from '../../core/vault/crypto'
 import { vaultPeerExecutable, vaultProcessIdentity, vaultSocketDescriptors } from './posixNative'
 import { bumpVaultEpoch } from './epochContender'
 import {
@@ -34,6 +49,18 @@ import {
   MILLISECONDS_PER_MINUTE,
 } from '../../shared/constants'
 
+const windowsHelperSchema = z.strictObject({
+  file: z.string().check(
+    z.minLength(1),
+    z.refine((value) => path.win32.isAbsolute(value)),
+  ),
+  sha256: z.string().check(z.regex(/^[a-f0-9]{64}$/u)),
+  powershell: z.string().check(
+    z.minLength(1),
+    z.refine((value) => path.win32.isAbsolute(value)),
+  ),
+  guardSource: z.string().check(z.minLength(1)),
+})
 const contextSchema = z.strictObject({
   dataDir: z.string().check(
     z.minLength(1),
@@ -48,6 +75,13 @@ const contextSchema = z.strictObject({
     z.refine((value) => path.isAbsolute(value)),
   ),
   userSession: z.string().check(z.minLength(1), z.maxLength(VAULT_LIMITS.text)),
+  // Windows only: the host-built slot helper (DPAPI/CNG/Hello). The broker
+  // refuses integrity failures instead of rebuilding: the host owns the build.
+  windowsHelper: z.optional(windowsHelperSchema),
+  // Windows only: the host-built pipe helper (serve/files relay). One file
+  // never serves both roles: the pipe helper owns the pipe and the
+  // owner-only files, the slot helper seals and unseals.
+  pipeHelper: z.optional(windowsHelperSchema),
 })
 export type VaultBrokerContext = z.infer<typeof contextSchema>
 /** Trusted runtime supplies execution, identity and scrub bindings; no substitute or empty success. */
@@ -65,27 +99,175 @@ export interface VaultBrokerBindings {
   readonly home: string
   readonly slots?: VaultSlotProvider
   readonly keyring?: KeyringEntryFactory
+  /**
+   * The rollback anchor the bindings chose: the OS store where its binding
+   * is installed, the owner-only file anchor where it is not. Absent for
+   * foreign constructors, which keep the keyring anchor below.
+   */
+  readonly anchor?: VaultAnchorPort
   readonly peers?: VaultPeerVerifier
   readonly privateFiles?: VaultPrivateFilesPort
   readonly idleMs?: number
   readonly lockOnScreenLock: boolean
 }
 
-/** Runs inside the broker process. Composes part A's blocks, never a second store/management/anchor. */
-export async function createVaultBrokerProcess(
-  input: VaultBrokerContext,
+/**
+ * This platform's slots: DPAPI/CNG/Hello on Windows, Keychain plus the
+ * Secure Enclave on macOS, Secret Service plus the TPM2 sealed object on
+ * Linux. The same selection serves every editor on the machine.
+ */
+export function defaultBrokerSlots(
+  context: Pick<VaultBrokerContext, 'installRoot'> & {
+    readonly windowsHelper?: z.infer<typeof windowsHelperSchema> | undefined
+  },
+  presenceRecords: () => Promise<readonly VaultSlotRecord[]>,
+): VaultSlotProvider {
+  switch (process.platform) {
+    case 'win32': {
+      const helper = context.windowsHelper
+      if (!helper) throw new Error(UI_TEXT.vault.noAccess)
+      return new WindowsVaultSlots(
+        {
+          ...helper,
+          rebuild: () => {
+            // The host owns the helper build; the broker refuses instead.
+            return Promise.reject(new Error(UI_TEXT.vault.noAccess))
+          },
+          report: () => {
+            process.stderr.write('vault-slot-rebuild-refused\n')
+          },
+        },
+        { presenceRecords },
+      )
+    }
+    case 'darwin': {
+      return new MacVaultSlots(macVaultTransport(macVaultSlotExecutable(context.installRoot)), {
+        presenceRecords,
+      })
+    }
+    case 'linux': {
+      return new LinuxVaultSlots()
+    }
+    default: {
+      throw new Error(UI_TEXT.vault.noAccess)
+    }
+  }
+}
+
+/**
+ * One channel body for every starter: the starter owns the pipe or socket
+ * and the claim, and supplies exactly what differs (files, keyring, peers,
+ * epoch contention and the listener). Everything else runs the same.
+ */
+export async function buildBrokerChannel(
+  context: VaultBrokerContext,
   bindings: VaultBrokerBindings,
+  owned: { broker?: VaultBroker; management?: VaultManagement },
+  location: VaultBrokerLocation,
+  parts: {
+    readonly privateFiles: VaultPrivateFilesPort
+    readonly files: NodeVaultFiles
+    readonly keyring: KeyringEntryFactory
+    readonly peers: VaultPeerVerifier
+    bump(owner: { processId: number; startedAt: number }, authorize?: () => void): Promise<number>
+    readonly listener: VaultSecuredListenerPort
+  },
 ) {
-  if (bindings.lockOnScreenLock && !bindings.slots) throw new Error(UI_TEXT.vault.noAccess)
-  const context = contextSchema.parse(input)
-  const helper = vaultPeerExecutable(context.installRoot)
-  const owned: { broker?: VaultBroker; management?: VaultManagement } = {}
-  return await startVaultBrokerProcess({
-    runDirectory: context.runDirectory,
-    dataDir: context.dataDir,
-    userSession: context.userSession,
-    helper,
-    ...(bindings.idleMs !== undefined && { idleMs: bindings.idleMs }),
+  const anchor = bindings.anchor ?? new KeyringVaultAnchor(parts.keyring)
+  const repository = new VaultStoreRepository(parts.files, anchor)
+  // Presence proofs resolve this vault's own presence-tier records: the
+  // supplier is bound after unlock exists, and fails closed before that.
+  const unlockRef: { current?: VaultSlotUnlock } = {}
+  const slots =
+    bindings.slots ??
+    defaultBrokerSlots(context, async () => {
+      const records = await unlockRef.current?.records()
+      return records ?? []
+    })
+  const unlock = new VaultSlotUnlock(parts.files, anchor, slots)
+  unlockRef.current = unlock
+  const clock = { now: () => Date.now() }
+  const managementRef: { current?: VaultManagement } = {}
+  const epoch = new VaultLockEpoch(context.runDirectory, parts.privateFiles)
+  const initialEpoch = await epoch.current()
+  const broker = new VaultBroker({
+    clock,
+    repository,
+    unlock,
+    epoch: {
+      current: () => epoch.current(),
+      bump: async (authorize) => {
+        // Epoch is shared across session/protocol brokers; a contender
+        // that finds the exclusive writer claimed decides by rule (dead
+        // holder replaced, live holder awaited then refused with the
+        // fixed reason), never an unhandled EEXIST. The owner is this
+        // broker's startup-proven identity.
+        return await parts.bump(
+          {
+            processId: location.lock.processId,
+            startedAt: location.lock.startedAt,
+          },
+          authorize,
+        )
+      },
+      subscribe: (listener) => {
+        const unsubscribe = epoch.subscribe(listener)
+        listener(initialEpoch)
+        return unsubscribe
+      },
+    },
+    audit: bindings.audit(repository),
+    identity: bindings.identity,
+    idleMs: VAULT_IDLE_MINUTES * MILLISECONDS_PER_MINUTE,
+    lockOnScreenLock: bindings.lockOnScreenLock,
+    firstPartyOnly: false,
+    onApproval: (request) => managementRef.current?.noteApproval(request),
+    onLocked: (epoch) => managementRef.current?.noteLocked(epoch),
+    onRevoked: (requesterId, grantId) => managementRef.current?.noteRevoked(requesterId, grantId),
+    onAuditFailure: bindings.onAuditFailure,
+    scrub: bindings.scrub,
+  })
+  const manage = new VaultManagement({
+    files: parts.files,
+    anchor,
+    repository,
+    unlock,
+    slots,
+    broker,
+    clock,
+    home: bindings.home,
+  })
+  managementRef.current = manage
+  const management = manage
+  // Grant saves no longer fire subscribe(); committed changes already
+  // reach watchers through VaultManagement's own subscribeCommitted
+  // forwarding (RVCM1091A F3), so no second subscriber is added here:
+  // one committed save must emit exactly one changed event (RVCM1091B2).
+  owned.broker = broker
+  owned.management = management
+  await broker.status()
+  return new VaultChannelServer({
+    broker,
+    peers: parts.peers,
+    manage: management,
+    listener: parts.listener,
+    bootToken: location.bootToken,
+    brokerId: location.lock.brokerId,
+    identify: bindings.identify,
+    ceiling: bindings.ceiling,
+    lifetime: bindings.lifetime,
+    perform: bindings.perform,
+    taint: bindings.taint,
+    scrub: bindings.scrub,
+  })
+}
+
+/** The lock-before-exit cleanup both broker processes run once, from close. */
+function brokerLockHandlers(owned: { broker?: VaultBroker; management?: VaultManagement }): {
+  lock: () => Promise<void>
+  dispose: () => Promise<void>
+} {
+  return {
     lock: async () => {
       try {
         const pending = await owned.management?.snapshot()
@@ -97,6 +279,28 @@ export async function createVaultBrokerProcess(
     dispose: async () => {
       await owned.broker?.dispose()
     },
+  }
+}
+
+/** Runs inside the broker process. Composes part A's blocks, never a second store/management/anchor. */
+export async function createVaultBrokerProcess(
+  input: VaultBrokerContext,
+  bindings: VaultBrokerBindings,
+  serve?: WindowsVaultBrokerServe,
+) {
+  if (bindings.lockOnScreenLock && !bindings.slots) throw new Error(UI_TEXT.vault.noAccess)
+  const context = contextSchema.parse(input)
+  if (process.platform === 'win32')
+    return await createWindowsVaultBrokerProcess(context, bindings, serve)
+  const helper = vaultPeerExecutable(context.installRoot)
+  const owned: { broker?: VaultBroker; management?: VaultManagement } = {}
+  return await startVaultBrokerProcess({
+    runDirectory: context.runDirectory,
+    dataDir: context.dataDir,
+    userSession: context.userSession,
+    helper,
+    ...(bindings.idleMs !== undefined && { idleMs: bindings.idleMs }),
+    ...brokerLockHandlers(owned),
     channel: async (location, listener) => {
       const privateFiles = bindings.privateFiles ?? new UnixVaultPrivateFiles()
       const files = new NodeVaultFiles(context.dataDir, VAULT_LIMITS.frameBytes)
@@ -106,11 +310,6 @@ export async function createVaultBrokerProcess(
         keyring = (service, account) =>
           new AsyncEntry(service, account, { linux: { store: 'secret-service' } })
       }
-      const anchor = new KeyringVaultAnchor(keyring)
-      const repository = new VaultStoreRepository(files, anchor)
-      const slots = bindings.slots ?? new PosixVaultSlots()
-      const unlock = new VaultSlotUnlock(files, anchor, slots)
-      const clock = { now: () => Date.now() }
       const peers =
         bindings.peers ??
         new UnixVaultPeerVerifier(
@@ -122,85 +321,71 @@ export async function createVaultBrokerProcess(
           },
           vaultSocketDescriptors,
         )
-      const managementRef: { current?: VaultManagement } = {}
-      const epoch = new VaultLockEpoch(context.runDirectory, privateFiles)
-      const initialEpoch = await epoch.current()
-      const broker = new VaultBroker({
-        clock,
-        repository,
-        unlock,
-        epoch: {
-          current: () => epoch.current(),
-          bump: async (authorize) => {
-            // Epoch is shared across session/protocol brokers; a contender
-            // that finds the exclusive writer claimed decides by rule under
-            // the kernel mutex (dead holder replaced, live holder awaited
-            // then refused with the fixed reason), never an unhandled EEXIST.
-            // The owner is this broker's startup-proven identity.
-            return await bumpVaultEpoch(
-              helper,
-              context.runDirectory,
-              privateFiles,
-              {
-                processId: location.lock.processId,
-                startedAt: location.lock.startedAt,
-              },
-              authorize,
-            )
-          },
-          subscribe: (listener) => {
-            const unsubscribe = epoch.subscribe(listener)
-            listener(initialEpoch)
-            return unsubscribe
-          },
-        },
-        audit: bindings.audit(repository),
-        identity: bindings.identity,
-        idleMs: VAULT_IDLE_MINUTES * MILLISECONDS_PER_MINUTE,
-        lockOnScreenLock: bindings.lockOnScreenLock,
-        firstPartyOnly: false,
-        onApproval: (request) => managementRef.current?.noteApproval(request),
-        onLocked: (epoch) => managementRef.current?.noteLocked(epoch),
-        onRevoked: (requesterId, grantId) =>
-          managementRef.current?.noteRevoked(requesterId, grantId),
-        onAuditFailure: bindings.onAuditFailure,
-        scrub: bindings.scrub,
-      })
-      const manage = new VaultManagement({
+      return await buildBrokerChannel(context, bindings, owned, location, {
+        privateFiles,
         files,
-        anchor,
-        repository,
-        unlock,
-        slots,
-        broker,
-        clock,
-        home: bindings.home,
-      })
-      managementRef.current = manage
-      const management = manage
-      // Grant saves no longer fire subscribe(); committed changes already
-      // reach watchers through VaultManagement's own subscribeCommitted
-      // forwarding (RVCM1091A F3), so no second subscriber is added here:
-      // one committed save must emit exactly one changed event (RVCM1091B2).
-      owned.broker = broker
-      owned.management = management
-      await broker.status()
-      return new VaultChannelServer({
-        broker,
+        keyring,
         peers,
-        manage: management,
+        bump: (owner, authorize) =>
+          bumpVaultEpoch(helper, context.runDirectory, privateFiles, owner, authorize),
         listener,
-        bootToken: location.bootToken,
-        brokerId: location.lock.brokerId,
-        identify: bindings.identify,
-        ceiling: bindings.ceiling,
-        lifetime: bindings.lifetime,
-        perform: bindings.perform,
-        taint: bindings.taint,
-        scrub: bindings.scrub,
       })
     },
   })
+}
+
+/** The Windows broker process: the serve helper owns the pipe the lock names. */
+async function createWindowsVaultBrokerProcess(
+  context: VaultBrokerContext,
+  bindings: VaultBrokerBindings,
+  serve?: WindowsVaultBrokerServe,
+) {
+  const helper = context.pipeHelper
+  if (!helper) throw new Error(UI_TEXT.vault.noAccess)
+  const owned: { broker?: VaultBroker; management?: VaultManagement } = {}
+  const pipeExecutable = {
+    ...helper,
+    rebuild: () => Promise.reject(new Error(UI_TEXT.vault.noAccess)),
+    report: () => {
+      process.stderr.write('vault-slot-rebuild-refused\n')
+    },
+  }
+  const options = {
+    runDirectory: context.runDirectory,
+    dataDir: context.dataDir,
+    userSession: context.userSession,
+    ...(bindings.idleMs !== undefined && { idleMs: bindings.idleMs }),
+    pipeHelper: pipeExecutable,
+    ...brokerLockHandlers(owned),
+    channel: async (
+      location: VaultBrokerLocation,
+      endpoint: {
+        readonly listener: VaultSecuredListenerPort
+        readonly peers: VaultPeerVerifier
+        readonly platform: WindowsBrokerPlatform
+      },
+    ) => {
+      const security = new WindowsPipeFiles(endpoint.platform.relay, () => new VaultError('io'))
+      const files = new NodeVaultFiles(context.dataDir, VAULT_LIMITS.frameBytes, security, 'win32')
+      let keyring = bindings.keyring
+      if (!keyring) {
+        const { AsyncEntry } = await import('@napi-rs/keyring')
+        keyring = (service, account) => new AsyncEntry(service, account)
+      }
+      return await buildBrokerChannel(context, bindings, owned, location, {
+        privateFiles: endpoint.platform.files,
+        files,
+        keyring,
+        peers: bindings.peers ?? endpoint.peers,
+        bump: (owner, authorize) =>
+          endpoint.platform.bumpEpoch(context.runDirectory, owner, authorize),
+        listener: endpoint.listener,
+      })
+    },
+  }
+  return serve
+    ? await startWindowsVaultBrokerOnServe({ ...options, helperFile: helper.file }, serve)
+    : await startWindowsVaultBrokerProcess(options)
 }
 
 /**
@@ -278,7 +463,10 @@ async function main(): Promise<void> {
     throw new Error(UI_TEXT.vault.noAccess)
   // Installed sibling module is a typed build boundary; validate its export before calling (PLAN §8).
   const runtime = createRequire(__filename)(path.join(__dirname, 'vaultRuntime.js')) as {
-    createVaultBrokerBindings?: (context: VaultBrokerContext) => Promise<VaultBrokerBindings>
+    createVaultBrokerBindings?: (
+      context: VaultBrokerContext,
+      platform?: WindowsBrokerPlatform,
+    ) => Promise<VaultBrokerBindings>
   }
   if (typeof runtime.createVaultBrokerBindings !== 'function')
     throw new Error(UI_TEXT.vault.brokerBlocked)
@@ -317,6 +505,36 @@ async function main(): Promise<void> {
       disposeResources = () => {
         disposeAdmission()
         resources.dispose()
+      }
+      // Windows serves its pipe before the bindings exist: the serve
+      // platform feeds the bindings, and the broker starts on that same
+      // serve instead of serving twice. POSIX builds no serve here.
+      if (process.platform === 'win32') {
+        const pipe = context.pipeHelper
+        if (!pipe) throw new Error(UI_TEXT.vault.noAccess)
+        const pipeExecutable = {
+          ...pipe,
+          rebuild: () => Promise.reject(new Error(UI_TEXT.vault.noAccess)),
+          report: () => {
+            process.stderr.write('vault-slot-rebuild-refused\n')
+          },
+        }
+        const serve = await startWindowsPipeServe(pipeExecutable, windowsVaultPipeName())
+        try {
+          const platform = windowsBrokerPlatform(serve.relay, serve.ownerSid, pipe.file)
+          return await createVaultBrokerProcess(
+            context,
+            await createBindings(context, platform),
+            serve,
+          )
+        } catch (error: unknown) {
+          try {
+            await serve.stop()
+          } catch {
+            /* Startup already failed; the stop is best-effort. */
+          }
+          throw error
+        }
       }
       return await createVaultBrokerProcess(context, await createBindings(context))
     })
