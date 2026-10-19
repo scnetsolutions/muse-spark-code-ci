@@ -65,6 +65,8 @@ const GOAL_REFUSED_ERROR = 'GoalRefusedError'
 const MUSE_CODE_FAULT_ERROR = 'MuseCodeFaultError'
 const DECISION_NOT_APPLIED_ERROR = 'DecisionNotAppliedError'
 const STEER_REFUSED_ERROR = 'SteerRefusedError'
+const PERMISSION_REVIEWER_ERROR = 'PermissionReviewerError'
+const MODE_KEPT_ERROR = 'ModeKeptError'
 
 /** An `Error` of either bundle carrying the given name. */
 function isNamedError(error: unknown, name: string): error is Error {
@@ -202,6 +204,65 @@ export function isSteerRefusedError(error: unknown): error is SteerRefusedError 
 }
 
 /**
+ * A mode change applied the approval mode on the host but could not install
+ * its reviewer (a managed exclusion, `permission_profile_unavailable`, a
+ * dropped connection, a deadline), and the previous mode is not known or
+ * could not be put back. The session is quarantined: turns are refused
+ * until a mode change succeeds, so the judge cannot allow a command the
+ * person expects to be asked about. `actualMode` is the wire mode the host
+ * runs, so the surface can show it instead of the mode that did not take.
+ */
+export class PermissionReviewerError extends Error {
+  public constructor(
+    message: string,
+    public readonly actualMode: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
+    this.name = PERMISSION_REVIEWER_ERROR
+  }
+}
+
+/** Whether the mode took but its reviewer did not (a `PermissionReviewerError` of either bundle). */
+export function isPermissionReviewerError(error: unknown): error is PermissionReviewerError {
+  return (
+    isNamedError(error, PERMISSION_REVIEWER_ERROR) &&
+    'actualMode' in error &&
+    typeof error.actualMode === 'string'
+  )
+}
+
+/**
+ * A mode change did not take, and the host still runs a mode whose reviewer
+ * agrees with it: the mode command itself was refused (so nothing changed),
+ * or a refused reviewer step was rolled back to the previous mode. The
+ * session is not quarantined: turns run on `actualMode`, which is the wire
+ * mode the host runs, so the surface can show it instead of the mode that
+ * did not take. `actualMode` is empty when the running mode is not known
+ * (an unseeded resume whose envelope served none): then the surface cannot
+ * show it and must refuse the send in flight instead.
+ */
+export class ModeKeptError extends Error {
+  public constructor(
+    message: string,
+    public readonly actualMode: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options)
+    this.name = MODE_KEPT_ERROR
+  }
+}
+
+/** Whether the host kept running a mode instead of changing (a `ModeKeptError` of either bundle). */
+export function isModeKeptError(error: unknown): error is ModeKeptError {
+  return (
+    isNamedError(error, MODE_KEPT_ERROR) &&
+    'actualMode' in error &&
+    typeof error.actualMode === 'string'
+  )
+}
+
+/**
  * Why a goal command was refused (M45, PLAN.md D38), as MSP's `commandRejected`
  * reasons say it (captured live 2026-09-25): `missing_goal` (there is none)
  * and `invalid_goal_state` (a finished goal cannot be paused, resumed or
@@ -299,6 +360,14 @@ export interface StartSessionOptions {
   readonly workspaceRoot: string
   readonly modelId: string
   readonly approvalMode: string
+  /**
+   * A native permission-profile id the host catalog admits (Muse Code 1.4.7
+   * `session/start.permissionProfile`): the interactive surfaces pass the
+   * profile their mode's words promise (`mspPermissionProfile`), so Manual
+   * asks the person instead of Muse Code's judge. Omitted means the host
+   * default; headless sessions omit it and behave as before.
+   */
+  readonly permissionProfile?: string
   /** Tool servers, keyed by name: the IDE's, or an ACP client's; needs the `sessionMcp` grant. */
   readonly mcpServers?: Readonly<Record<string, SessionMcpServer>>
   /** A new conversation kept in a side-chat surface (M53). */
@@ -438,6 +507,12 @@ export interface SessionRecord {
    * opens it in a mode that asks, whatever the initial mode.
    */
   readonly imported?: boolean
+  /**
+   * The approval mode the host runs, served on start/read/resume (never on
+   * `session/list` rows): a resumed handle starts knowing which mode to put
+   * back when a later mode change fails.
+   */
+  readonly approvalMode?: { readonly mode: string } | undefined
 }
 
 export interface SessionPage {
@@ -503,7 +578,15 @@ export interface AgentSession {
   setModel(modelId: string): Promise<void>
   /** The session's standing reasoning-effort default (wire vocabulary). */
   setReasoningEffort(reasoningEffort: string): Promise<void>
-  /** One of the four MSP approval modes (shared/permissionModes.ts). */
+  /**
+   * One of the four MSP approval modes (shared/permissionModes.ts). Throws
+   * `PermissionReviewerError` when the mode took but its reviewer did not:
+   * the session is quarantined (turns refused) and `actualMode` is the wire
+   * mode the host runs, which the surface must show. Throws `ModeKeptError`
+   * when the change did not take and the host still runs a mode whose
+   * reviewer agrees with it: the session is not quarantined, and `actualMode`
+   * is the running mode the surface must show instead (empty when unknown).
+   */
   setApprovalMode(mode: string): Promise<void>
   compact(): Promise<CompactOutcome>
   decideApproval(decision: ApprovalDecision): Promise<void>

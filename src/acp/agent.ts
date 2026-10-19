@@ -47,6 +47,8 @@ import {
 import {
   type AgentHost,
   type AgentSession,
+  isModeKeptError,
+  isPermissionReviewerError,
   isPromptSettledError,
   type ModelSummary,
   type SessionMcpServer,
@@ -90,6 +92,8 @@ import type { PaidUseRequest } from '../shared/paid'
 import {
   approvalModeFor,
   availablePermissionModes,
+  composerModeForApprovalMode,
+  mspStartPermissionProfile,
   permissionModeDetail,
 } from '../shared/permissionModes'
 import { type AcpPaidUse, paidUseAnswer, paidUseOptions } from './paid'
@@ -1138,6 +1142,33 @@ class AcpSession {
     }
   }
 
+  /**
+   * Show the wire mode a refused mode change names (GRV251D): the editor is
+   * told the mode the host runs. Nothing is published when no editor mode
+   * selects it; the throw still carries the error's own true sentence.
+   */
+  private async showRunningMode(
+    error: { actualMode: string },
+    preferred: PermissionMode,
+  ): Promise<void> {
+    const shown = composerModeForApprovalMode(error.actualMode, preferred, true)
+    if (shown === undefined) return
+    this.mode = shown
+    this.send({ sessionUpdate: 'current_mode_update', currentModeId: shown })
+    await this.outbox
+  }
+
+  /** A load or resume runs on the remembered mode: a refusal names the host's instead. */
+  private async syncRememberedMode(): Promise<void> {
+    try {
+      await this.session.setApprovalMode(approvalModeFor(this.mode, true))
+    } catch (error: unknown) {
+      if (!isPermissionReviewerError(error) && !isModeKeptError(error)) throw error
+      await this.showRunningMode(error, this.mode)
+      throw error
+    }
+  }
+
   /** A late answer belongs only to the prompt that asked, while that prompt still runs. */
   private isCurrentPrompt(pending: PendingPrompt | undefined): boolean {
     return !this.isDisposed && this.pending === pending && pending?.isCancelled !== true
@@ -1538,7 +1569,7 @@ class AcpSession {
    */
   public async matchAdvertised(): Promise<void> {
     this.ensureHeld()
-    await this.session.setApprovalMode(approvalModeFor(this.mode, true))
+    await this.syncRememberedMode()
     const reported = await this.host.listModels(this.sessionId)
     const active = reported.find((model) => model.isActive)
     if (active !== undefined && this.models.some((model) => model.modelId === active.modelId)) {
@@ -1578,7 +1609,7 @@ class AcpSession {
    */
   public async restoreChoice(modelId: string, effort: EffortLevel): Promise<void> {
     this.ensureHeld()
-    await this.session.setApprovalMode(approvalModeFor(this.mode, true))
+    await this.syncRememberedMode()
     this.ensureHeld()
     // Muse resume needs an explicit selection; Model API's loaded model is
     // authoritative and an unchanged selection must not run switch hooks.
@@ -1616,7 +1647,15 @@ class AcpSession {
       throw RequestError.invalidParams(undefined, modeId)
     }
     this.ensureHeld()
-    await this.session.setApprovalMode(approvalModeFor(mode, true))
+    try {
+      await this.session.setApprovalMode(approvalModeFor(mode, true))
+    } catch (error: unknown) {
+      if (!isPermissionReviewerError(error) && !isModeKeptError(error)) throw error
+      // The host runs another mode: show it so the editor agrees with the
+      // host, then report the failure in the error's own true words.
+      await this.showRunningMode(error, mode)
+      throw error
+    }
     this.mode = mode
     // The set took: tell the editor, which otherwise keeps showing the old
     // mode (it learns it only from new/load responses and this notice).
@@ -2519,10 +2558,20 @@ class AgentState {
     const { host, models } = await this.openHost(cwd)
     const modelId = startingModel(models)
     const mcpServers = this.forwardedMcp(host, requestedMcp)
+    const approvalMode = approvalModeFor(this.deps.options.initialMode, true)
+    // Manual asks the person because the session reviews with `:ask-me`
+    // instead of Muse Code's judge (Muse Code 1.4.7); Auto keeps the judge
+    // its words describe. Omitted profiles keep the host default, which is
+    // what every headless session starts with, as before.
+    const permissionProfile = mspStartPermissionProfile(
+      approvalMode,
+      this.deps.options.isHeadless === true,
+    )
     const session = await host.startSession({
       workspaceRoot: cwd,
       modelId,
-      approvalMode: approvalModeFor(this.deps.options.initialMode, true),
+      approvalMode,
+      ...(permissionProfile !== undefined && { permissionProfile }),
       ...(mcpServers !== undefined && { mcpServers }),
     })
     // The mode and model went with the start; the effort is set here.
