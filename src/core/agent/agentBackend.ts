@@ -248,6 +248,15 @@ export interface HostInfo {
   readonly grantedCapabilities: readonly string[]
   /** False where the host is known to refuse `rename` and `forkSession` (D26). */
   readonly canEditSessions: boolean
+  /**
+   * False where the host cannot delete a stored conversation: the Model API
+   * backend always can (its own session store). Absent on a Muse Code host:
+   * its delete gate (`canDeleteMuseSession`, version plus the injected
+   * lifecycle reader) stays out of the activation bundle, so the host omits
+   * the field and History offers no Delete there until the reader injection
+   * lands and wires the offer (PLAN.md D26).
+   */
+  readonly canDeleteSessions?: boolean | undefined
 }
 
 export interface ModelSummary {
@@ -637,6 +646,14 @@ export interface AgentHost {
     lastTurnId?: string,
     options?: { readonly sideChat?: boolean },
   ): Promise<LoadedSession>
+  /**
+   * Permanently removes a stored conversation from the backend's store, so
+   * History lists it no more: Muse Code through its `session/delete`
+   * command, the Model API through the product's own session store. Only
+   * where `info.canDeleteSessions` says so; the caller confirms first, and
+   * a failure names its real cause while the session stays listed.
+   */
+  deleteSession(sessionId: string): Promise<void>
   onSessionListEvent(listener: (event: SessionListEvent) => void): () => void
   /**
    * The subscription usage the host last observed (M8); undefined when there

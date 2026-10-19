@@ -17160,12 +17160,20 @@ export class ModelApiHost implements AgentHost {
    * written onto this.
    */
   private readonly lastSaved = new Map<string, StoredSession>()
+  /**
+   * Sessions History deleted: their store file, header and queued saves are
+   * gone, and no later save may bring them back. Their live session is
+   * stopped with them — unlistable, unsavable, and no longer resumable.
+   */
+  private readonly deletedSessionIds = new Set<string>()
   public readonly info: HostInfo = {
     kind: 'modelApi',
     serverName: MODEL_API_SERVER_NAME,
     serverVersion: MODEL_API_VERSION,
     grantedCapabilities: [],
     canEditSessions: true,
+    // Deletion is the product's own session store, always available.
+    canDeleteSessions: true,
   }
 
   public constructor(private readonly deps: ModelApiHostDeps) {
@@ -17213,6 +17221,13 @@ export class ModelApiHost implements AgentHost {
   }
 
   private announce(session: ModelApiSession): void {
+    // History's delete wins over a late touch: a turn settling after the
+    // removal must not publish the session again (the row would come back
+    // with its file gone). Every save already refuses a deleted id; the
+    // list event refuses one here.
+    if (this.deletedSessionIds.has(session.sessionId)) {
+      return
+    }
     notify<SessionListEvent>(
       this.listListeners,
       { type: 'changed', record: session.record() },
@@ -17236,6 +17251,12 @@ export class ModelApiHost implements AgentHost {
     shouldSetHeaderAfterSave: boolean,
   ): Promise<void> {
     const sessionId = snapshot.sessionId
+    // History's delete wins over every later save: a deleted conversation is
+    // never written again, so a persist that arrives after the removal
+    // resolves without touching the store.
+    if (this.deletedSessionIds.has(sessionId)) {
+      return Promise.resolve()
+    }
     const header = headerOf(snapshot)
     if (!shouldSetHeaderAfterSave) {
       this.stored.set(sessionId, header)
@@ -17295,9 +17316,17 @@ export class ModelApiHost implements AgentHost {
       }
       state.latest = undefined
       const coveredThrough = state.sequence
+      if (this.deletedSessionIds.has(sessionId)) {
+        // History deleted this conversation while its save waited: drop the
+        // write (the removal already won or drains ahead of it) and let its
+        // waiters go — a deleted conversation needs no save.
+        this.settleSaveWaiters(state, coveredThrough, undefined)
+        continue
+      }
       try {
         await store.save(pending.snapshot)
-        if (pending.setHeaderAfterSave) {
+        // A save that History's delete overtook must not list the session again.
+        if (pending.setHeaderAfterSave && !this.deletedSessionIds.has(sessionId)) {
           this.stored.set(sessionId, pending.header)
         }
       } catch (error: unknown) {
@@ -17335,6 +17364,10 @@ export class ModelApiHost implements AgentHost {
     if (store === undefined) {
       return isStrict ? Promise.reject(new Error(UI_TEXT.historyUnavailable)) : Promise.resolve()
     }
+    // A deleted conversation stays deleted: its turns save nothing more.
+    if (this.deletedSessionIds.has(session.sessionId)) {
+      return Promise.resolve()
+    }
     const snapshot = this.ownedSnapshot(session.snapshot())
     // A turn-start user message can be saved, but a function call without
     // its output cannot be replayed after a crash. Goal/settings touches
@@ -17361,6 +17394,12 @@ export class ModelApiHost implements AgentHost {
     store: SessionStore,
     isStrict = false,
   ): Promise<void> {
+    // A deleted conversation stays deleted: spend settling after History's
+    // removal writes nothing and never rejects (the success notice already
+    // went out, and a rejection after it would lie about the delete).
+    if (this.deletedSessionIds.has(snapshot.sessionId)) {
+      return Promise.resolve()
+    }
     const last = this.lastSaved.get(snapshot.sessionId)
     if (last === undefined) {
       return isStrict ? Promise.reject(new Error(UI_TEXT.historyUnavailable)) : Promise.resolve()
@@ -17400,6 +17439,12 @@ export class ModelApiHost implements AgentHost {
     session: ModelApiSession,
     isRefund = false,
   ): Promise<void> {
+    // A request that ends after History deleted its conversation settles
+    // nothing: the refund is a no-op that never rejects, so the turn that
+    // was aborted by the delete cannot write the session back.
+    if (this.deletedSessionIds.has(session.sessionId)) {
+      return
+    }
     const { store } = this.deps
     if (store === undefined) {
       throw new Error(UI_TEXT.historyUnavailable)
@@ -17417,6 +17462,8 @@ export class ModelApiHost implements AgentHost {
 
   /** Persist retry claims without putting an unanswered call in replay. */
   private persistTeamCommands(session: ModelApiSession): Promise<void> {
+    // A team touch after History's delete persists nothing and never rejects.
+    if (this.deletedSessionIds.has(session.sessionId)) return Promise.resolve()
     const { store } = this.deps
     if (store === undefined) return Promise.resolve()
     const snapshot = this.ownedSnapshot(session.snapshot())
@@ -17553,6 +17600,12 @@ export class ModelApiHost implements AgentHost {
 
   /** The live session, or the stored one brought back into this window. */
   private async revive(sessionId: string, isSideChatRequired = false): Promise<ModelApiSession> {
+    // A conversation History deleted stays gone, even for a revive racing
+    // the removal: the delete stops and forgets the live session, so there
+    // is nothing here to bring back.
+    if (this.deletedSessionIds.has(sessionId)) {
+      throw new Error(`session ${sessionId} is not held by this window`)
+    }
     const live = this.sessions.get(sessionId)
     if (live !== undefined) {
       if (isSideChatRequired && live.record().sideChat !== true) {
@@ -17809,7 +17862,8 @@ export class ModelApiHost implements AgentHost {
       .filter(
         (record) =>
           record.workspaceRoot === options.workspaceRoot &&
-          !this.pendingSummaryForks.has(record.sessionId),
+          !this.pendingSummaryForks.has(record.sessionId) &&
+          !this.deletedSessionIds.has(record.sessionId),
       )
       .toSorted(
         (a, b) =>
@@ -17817,6 +17871,45 @@ export class ModelApiHost implements AgentHost {
       )
       .slice(0, options.limit)
     return { sessions, nextCursor: undefined }
+  }
+
+  /**
+   * History's Delete: the conversation leaves the product's own session
+   * store for good (its questions and uploads go with it, through the
+   * store), and no queued or later save may list it again. Unknown ids
+   * resolve: the store's removal is idempotent, and there is nothing to
+   * name — the row is already gone.
+   */
+  public async deleteSession(sessionId: string): Promise<void> {
+    await this.requireAccountId()
+    const { store } = this.deps
+    if (store === undefined) {
+      throw new Error(UI_TEXT.historyUnavailable)
+    }
+    // Mark first: every save queued after this line is a no-op (queueSave
+    // and the save writer refuse deleted ids), so nothing queued later can
+    // run after `remove` and bring the file back.
+    this.deletedSessionIds.add(sessionId)
+    try {
+      // Saves queued before the mark drain first, so the removal below wins
+      // over them.
+      await this.saving
+      await store.remove(sessionId)
+    } catch (error: unknown) {
+      this.deletedSessionIds.delete(sessionId)
+      throw error
+    }
+    this.stored.delete(sessionId)
+    this.lastSaved.delete(sessionId)
+    this.saveStates.delete(sessionId)
+    this.pendingSummaryForks.delete(sessionId)
+    // The conversation is gone: a live turn still holding it stops now, so
+    // it cannot keep spending into what History removed. Its settling refund
+    // is a no-op above — it writes nothing and never rejects.
+    const live = this.sessions.get(sessionId)
+    if (live !== undefined) {
+      live.disposeAll()
+    }
   }
 
   /** A conversation or one of its private child transcripts (M48). */

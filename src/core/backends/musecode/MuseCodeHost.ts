@@ -2042,6 +2042,12 @@ export class MuseCodeHost implements AgentHost {
       // is limited there until one is verified (D26). A 1.3.0 ceiling showed
       // the failing actions again on 1.4.0 (0.9.1, release-0.9.1.md).
       canEditSessions: parsed.platformOs !== WINDOWS_OS,
+      // No `canDeleteSessions`: the delete gate
+      // (`./museDeleteGate.ts`, version plus the injected lifecycle reader)
+      // lives outside the activation graph so the budget holds, so a Muse
+      // Code host omits the field and History offers no Delete there.
+      // Nothing is sent the CLI cannot answer (PLAN.md D26); the reader
+      // injection wires the offer when it lands.
     }
     this.log.info(
       `MSP host on ${parsed.platformOs ?? 'an unreported OS'}, schema v${String(parsed.schema?.version ?? 'unreported')} ${parsed.schema?.fingerprint ?? ''}, sessions ${parsed.sessionDurability ?? DURABLE_SESSIONS}`,
@@ -2487,8 +2493,13 @@ export class MuseCodeHost implements AgentHost {
     }
   }
 
-  /** The caller confirms permanent deletion before invoking this operation. */
-  public async deleteSession(sessionId: string): Promise<MuseCodeLifecycleEvent> {
+  /**
+   * The caller confirms permanent deletion before invoking this operation.
+   * Resolves once the terminal `deleteCompleted` notification arrives; that
+   * terminal itself reaches `onMuseCodeLifecycleEvent` listeners. (No caller
+   * uses the terminal return, so this resolves `void`.)
+   */
+  public async deleteSession(sessionId: string): Promise<void> {
     const reader = this.features.lifecycle
     if (reader === undefined) throw new Error(UI_TEXT.memoryDeleteAction)
     const signal = this.deletionStopped.signal
@@ -2527,7 +2538,7 @@ export class MuseCodeHost implements AgentHost {
       signal.addEventListener('abort', onAbort, { once: true })
     })
     try {
-      return await withDeadline(
+      await withDeadline(
         Promise.race([
           (async () => {
             reader.parseDeleteAdmission(
@@ -2549,7 +2560,7 @@ export class MuseCodeHost implements AgentHost {
       )
     } catch (error: unknown) {
       // Dispatch validated the terminal before shutdown; async admission may still be resuming.
-      if (deletion.state.phase === 'terminalValidated') return deletion.state.event
+      if (deletion.state.phase === 'terminalValidated') return
       throw error
     } finally {
       deletion.state = { phase: 'reported' }
