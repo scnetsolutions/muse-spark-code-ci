@@ -498,8 +498,9 @@ export async function runVaultBrokerEntry(
   }
 }
 
-function resourceFailure(): void {
-  process.stderr.write('vault-resource-refused\n')
+function resourceFailure(error?: unknown): void {
+  const cause = error instanceof Error ? error.cause : undefined
+  process.stderr.write('vault-resource-refused ' + (error instanceof Error ? (error.stack ?? error.message) : String(error)) + ' cause=' + (cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)) + '\n')
 }
 
 /** A serve that failed to start stops best-effort; the startup failure is the one that throws. */
