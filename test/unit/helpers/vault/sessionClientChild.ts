@@ -44,7 +44,9 @@ void (async () => {
   .finally(() => {
     lifecycle.dispose?.()
   })
-  .catch(() => {
+  .catch((error: unknown) => {
+    process.stderr.write(`DIAG-CLIENT-FAILED ${error instanceof Error ? (error.stack ?? error.message) + " cause=" + String(error.cause instanceof Error ? error.cause.stack : error.cause) : String(error)}
+`)
     process.send?.({ failed: true })
     process.exitCode = 1
   })
