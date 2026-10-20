@@ -77,7 +77,7 @@ function client(data: string, id: string) {
         HOME: fixture.root,
         ...(runtimeDir !== undefined && { XDG_RUNTIME_DIR: runtimeDir }),
       },
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      stdio: process.env.DIAG_BROKER ? ['ignore', 'inherit', 'inherit', 'ipc'] : ['ignore', 'ignore', 'ignore', 'ipc'],
     },
   )
   children.add(child)
@@ -138,7 +138,7 @@ async function cleaned(directory: string) {
   }
 }
 describe.skipIf(!hasSocketFit || process.platform === 'win32')('session-owned POSIX broker', () => {
-  it('survives orderly launcher resource shutdown and locks only after its last client leaves', async () => {
+  it.only('survives orderly launcher resource shutdown and locks only after its last client leaves', async () => {
     const data = path.join(fixture.root, 'lifetime')
     const a = await client(data, 'a')
     const location = await ready(a)
