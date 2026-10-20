@@ -7,6 +7,7 @@
 // under the folder fail with the kernel's own EACCES/EPERM.
 import { execFile } from 'node:child_process'
 import { chmod } from 'node:fs/promises'
+import { readdirSync } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 
@@ -38,6 +39,14 @@ export async function denyAccess(folder: string): Promise<() => Promise<void>> {
   }
   const sid = await windowsUserSid()
   await icacls([folder, '/deny', `*${sid}:(OI)(CI)F`])
+  // Diagnostic branch only: whether access is denied right after the entry.
+  let probe = 'listed'
+  try {
+    readdirSync(folder)
+  } catch (error: unknown) {
+    probe = error instanceof Error && 'code' in error ? String(error.code) : 'error'
+  }
+  process.stderr.write(`DIAG deny ${folder} list=${probe}\n`)
   return async () => {
     await icacls([folder, '/remove:d', `*${sid}`])
   }

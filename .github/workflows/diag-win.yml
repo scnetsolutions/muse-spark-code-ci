@@ -1,0 +1,27 @@
+name: Windows deny tests under Git Bash and in their shard (diagnostic, mirror only)
+
+on:
+  push:
+    branches: [ci/diag-win]
+
+permissions:
+  contents: read
+
+jobs:
+  facts:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: the four alone, from Git Bash
+        shell: bash
+        run: |
+          echo "TEMP=$TEMP TMP=$TMP"
+          node -e "console.log('node tmpdir', require('os').tmpdir())"
+          npx vitest run test/unit/legalSnapshotUnreadable.test.ts test/unit/worktreeCommands.test.ts test/unit/reviewCollector.test.ts test/unit/vault/vaultExecSpawn.test.ts --reporter=verbose || true
+      - name: shard 14 of 16, from Git Bash, as CI runs it
+        shell: bash
+        run: npx vitest run --shard=14/16 --reporter=default || true
